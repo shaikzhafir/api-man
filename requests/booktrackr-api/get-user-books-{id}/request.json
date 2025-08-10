@@ -1,0 +1,7 @@
+{
+  "url": "/user/books/{id}",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "get-user-books-{id}"
+}

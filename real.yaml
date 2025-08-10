@@ -1,0 +1,662 @@
+openapi: 3.0.3
+info:
+  title: BookTrackr API
+  description: A book tracking application API that allows users to manage their reading progress
+  version: 1.0.0
+  contact:
+    name: API Support
+servers:
+  - url: http://localhost:8080
+    description: Development server
+
+components:
+  securitySchemes:
+    SessionAuth:
+      type: apiKey
+      in: cookie
+      name: session_id
+    
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Unique user identifier
+        username:
+          type: string
+          description: Username
+      required:
+        - id
+        - username
+
+    Book:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Unique book identifier
+        isbn:
+          type: string
+          description: Book ISBN
+        title:
+          type: string
+          description: Book title
+        description:
+          type: string
+          description: Book description
+        author:
+          type: string
+          description: Book author
+        image_url:
+          type: string
+          format: uri
+          description: URL to book cover image
+      required:
+        - id
+        - isbn
+        - title
+        - description
+        - author
+        - image_url
+
+    UserBook:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Book ID
+        isbn:
+          type: string
+          description: Book ISBN
+        title:
+          type: string
+          description: Book title
+        description:
+          type: string
+          description: Book description
+        author:
+          type: string
+          description: Book author
+        image_url:
+          type: string
+          format: uri
+          description: URL to book cover image
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Reading progress percentage
+        start_date:
+          type: string
+          description: Date when reading started
+        finish_date:
+          type: string
+          description: Date when reading finished
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: User rating for the book
+        review:
+          type: string
+          description: User review of the book
+      required:
+        - id
+        - isbn
+        - title
+        - description
+        - author
+        - image_url
+        - progress
+        - start_date
+        - finish_date
+        - rating
+
+    GoogleBooksVolume:
+      type: object
+      description: Google Books API volume response
+      additionalProperties: true
+
+    JSONResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Response message
+        data:
+          oneOf:
+            - type: object
+            - type: array
+              items: {}
+            - type: string
+            - type: number
+            - type: boolean
+          description: Response data
+        error:
+          type: string
+          description: Error message if any
+      required:
+        - message
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+      required:
+        - error
+
+    RegisterRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          description: Desired username
+        password:
+          type: string
+          format: password
+          description: User password
+      required:
+        - username
+        - password
+
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          description: Username
+        password:
+          type: string
+          format: password
+          description: User password
+      required:
+        - username
+        - password
+
+    CreateBookRequest:
+      type: object
+      properties:
+        isbn:
+          type: string
+          description: Book ISBN
+        title:
+          type: string
+          description: Book title
+        description:
+          type: string
+          description: Book description
+        author:
+          type: string
+          description: Book author
+        image_url:
+          type: string
+          format: uri
+          description: URL to book cover image
+      required:
+        - isbn
+        - title
+        - description
+        - author
+        - image_url
+
+    UpdateUserBookRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Book ID as string
+        start_date:
+          type: string
+          description: Date when reading started
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Reading progress percentage
+        finish_date:
+          type: string
+          description: Date when reading finished
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: User rating for the book
+        review:
+          type: string
+          description: User review of the book
+      required:
+        - id
+
+paths:
+  /register:
+    post:
+      tags:
+        - Authentication
+      summary: Register a new user
+      description: Create a new user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/JSONResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Username already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user and create session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: session_id=abc123; HttpOnly; Secure; SameSite=Lax
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/JSONResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                            format: int64
+                          username:
+                            type: string
+                          session_id:
+                            type: string
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /logout:
+    post:
+      tags:
+        - Authentication
+      summary: User logout
+      description: Invalidate user session
+      security:
+        - SessionAuth: []
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Logout successful"
+
+  /me:
+    get:
+      tags:
+        - Authentication
+      summary: Get current user info
+      description: Retrieve information about the currently authenticated user
+      security:
+        - SessionAuth: []
+      responses:
+        '200':
+          description: User information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /verifysession:
+    get:
+      tags:
+        - Authentication
+      summary: Verify session
+      description: Verify if the current session is valid
+      security:
+        - SessionAuth: []
+      responses:
+        '200':
+          description: Session is valid
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/JSONResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                            format: int64
+                          username:
+                            type: string
+                          session_id:
+                            type: string
+        '401':
+          description: Unauthorized or session expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /google/login:
+    get:
+      tags:
+        - OAuth
+      summary: Google OAuth login
+      description: Redirect to Google OAuth login
+      responses:
+        '302':
+          description: Redirect to Google OAuth
+
+  /google/callback:
+    get:
+      tags:
+        - OAuth
+      summary: Google OAuth callback
+      description: Handle Google OAuth callback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+          description: OAuth authorization code
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+          description: OAuth state parameter
+      responses:
+        '302':
+          description: Redirect to frontend after successful authentication
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: session_id=abc123; HttpOnly; Secure; SameSite=Lax
+        '500':
+          description: OAuth authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /google/books:
+    get:
+      tags:
+        - Books
+      summary: Search external books
+      description: Search books using Google Books API
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query for books
+      responses:
+        '200':
+          description: Books retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/JSONResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/GoogleBooksVolume'
+        '400':
+          description: Query parameter required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No books found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /user/books:
+    get:
+      tags:
+        - User Books
+      summary: Get user's books
+      description: Retrieve all books for the authenticated user
+      security:
+        - SessionAuth: []
+      responses:
+        '200':
+          description: Books retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/JSONResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/UserBook'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      tags:
+        - User Books
+      summary: Add book to user's library
+      description: Add a new book to the authenticated user's library
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBookRequest'
+      responses:
+        '201':
+          description: Book added successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/JSONResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                            format: int64
+                          isbn:
+                            type: string
+                          title:
+                            type: string
+                          description:
+                            type: string
+                          author:
+                            type: string
+                          image_url:
+                            type: string
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /user/books/{id}:
+    get:
+      tags:
+        - User Books
+      summary: Get specific user book
+      description: Retrieve a specific book from the authenticated user's library
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Book ID
+      responses:
+        '200':
+          description: Book retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/JSONResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UserBook'
+        '400':
+          description: Invalid book ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      tags:
+        - User Books
+      summary: Update user book
+      description: Update reading progress and other details for a user's book
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Book ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserBookRequest'
+      responses:
+        '200':
+          description: Book updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JSONResponse'
+        '400':
+          description: Bad request - Invalid data or constraints violated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+tags:
+  - name: Authentication
+    description: User authentication and session management
+  - name: OAuth
+    description: Google OAuth authentication
+  - name: Books
+    description: External book search operations
+  - name: User Books
+    description: User's personal book library management

@@ -1,0 +1,13 @@
+{
+  "name": "post-login",
+  "description": "User login endpoint",
+  "method": "POST",
+  "url": "/login",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "cookies": {},
+  "body": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password123\"\n}",
+  "params": {},
+  "timeout": 30
+}

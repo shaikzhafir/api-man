@@ -1,0 +1,9 @@
+{
+  "url": "/logout",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "",
+  "method": "POST",
+  "name": "post-logout"
+}

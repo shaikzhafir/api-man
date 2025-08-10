@@ -1,0 +1,7 @@
+{
+  "url": "/verifysession",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "get-verifysession"
+}

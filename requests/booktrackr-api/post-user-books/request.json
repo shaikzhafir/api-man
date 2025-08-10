@@ -1,0 +1,9 @@
+{
+  "url": "/user/books",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\n  \"example\": \"data\"\n}",
+  "method": "POST",
+  "name": "post-user-books"
+}

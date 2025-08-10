@@ -1,0 +1,7 @@
+{
+  "url": "/google/login",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "get-google-login"
+}

@@ -1,0 +1,11 @@
+{
+  "name": "Get Users",
+  "description": "Fetch all users from the API",
+  "method": "GET",
+  "url": "/users",
+  "headers": {},
+  "cookies": {},
+  "body": "",
+  "params": {},
+  "timeout": 30
+}

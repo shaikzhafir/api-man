@@ -1,0 +1,11 @@
+{
+  "baseURL": "http://localhost:8080",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "cookies": {},
+  "auth": {},
+  "variables": {
+    "host": "localhost:8080"
+  }
+}
