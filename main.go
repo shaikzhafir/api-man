@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
@@ -41,12 +39,6 @@ func main() {
 		listRequests()
 	case "envs":
 		listEnvironments()
-	case "tui":
-		if len(os.Args) < 3 {
-			fmt.Println("Usage: api-man tui <openapi-spec.yaml>")
-			os.Exit(1)
-		}
-		runTUI(os.Args[2])
 	case "body":
 		handleBodyCommand()
 	case "web":
@@ -61,13 +53,8 @@ func main() {
 			runWebServer(port, staticDir)
 		}
 	default:
-		// Legacy mode - if the argument is a yaml file, run TUI
-		if len(os.Args) == 2 && (endsWith(os.Args[1], ".yaml") || endsWith(os.Args[1], ".yml")) {
-			runTUI(os.Args[1])
-		} else {
-			printUsage()
-			os.Exit(1)
-		}
+		printUsage()
+		os.Exit(1)
 	}
 }
 
@@ -80,7 +67,6 @@ func printUsage() {
 	fmt.Println("  api-man run <request> <env>            Execute a request with an environment")
 	fmt.Println("  api-man list                           List all available requests")
 	fmt.Println("  api-man envs                           List all available environments")
-	fmt.Println("  api-man tui <spec.yaml>                Run TUI mode with OpenAPI spec")
 	fmt.Println("  api-man web [port] [static-dir]        Start web server (default: port 3000, ./frontend/dist)")
 	fmt.Println("  api-man body <command> [args]          Manage JSON body templates")
 	fmt.Println()
@@ -228,26 +214,6 @@ func listEnvironments() {
 		}
 		fmt.Printf("  🌍 %s - %s\n", env, envConfig.BaseURL)
 	}
-}
-
-func runTUI(specFile string) {
-	spec, err := LoadOpenAPISpec(specFile)
-	if err != nil {
-		log.Fatal("Error loading OpenAPI spec:", err)
-	}
-
-	// Initialize the TUI model
-	m := NewModel(spec)
-
-	// Start the TUI
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func endsWith(s, suffix string) bool {
-	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
 }
 
 func handleBodyCommand() {

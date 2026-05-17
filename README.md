@@ -10,9 +10,8 @@ A filesystem-based API request management tool with a web-based Postman-like UI 
 - **Execute requests**: Run API calls from command line
 - **Manage environments**: Switch between dev, staging, prod configurations
 - **Body templates**: Manage multiple JSON body templates per request
-- **Terminal UI**: Interactive text-based interface
 
-### Web Interface (New!)
+### Web Interface
 - **Postman-like UI**: Modern web interface for API testing
 - **Visual request builder**: Method selection, URL input, headers, and body editing
 - **Environment switching**: Easy environment selection from dropdown
@@ -85,9 +84,6 @@ For backend and frontend development with hot reload:
 # Execute a request
 ./api-man run booktrackr-api/get-me dev
 
-# Start TUI mode
-./api-man tui spec.yaml
-
 # Start web server
 ./api-man web [port] [static-dir]
 ```
@@ -111,8 +107,6 @@ api-man/
 ├── main.go              # Main CLI application
 ├── config.go           # Configuration management
 ├── webserver.go        # Web server for UI
-├── http.go            # HTTP request execution
-├── tui.go             # Terminal UI
 ├── openapi.go         # OpenAPI spec parsing
 ├── requests/          # Request definitions
 │   └── [collection]/
