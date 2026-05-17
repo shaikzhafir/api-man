@@ -267,6 +267,188 @@
   color: var(--stone-500);
 }
 
+.import-status.conflict {
+  background: var(--warn-soft);
+  color: var(--stone-900);
+  border: 1px solid var(--warn);
+  padding: 0.6rem 0.65rem;
+  margin-top: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.import-status-message {
+  color: var(--warn);
+  font-weight: 500;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.import-form {
+  margin-top: 0.55rem;
+  padding: 0.6rem 0.65rem;
+  border: 1px solid var(--stone-200);
+  border-radius: 4px;
+  background: var(--stone-50);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+}
+
+.import-form-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.import-form-name {
+  align-items: stretch;
+}
+
+.import-form-label {
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--stone-500);
+  min-width: 60px;
+  flex-shrink: 0;
+}
+
+.import-form-value {
+  font-family: var(--font-mono);
+  color: var(--stone-700);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.import-form-input {
+  flex: 1;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--stone-200);
+  border-radius: 3px;
+  background: var(--stone-50);
+  color: var(--stone-900);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  outline: none;
+  min-width: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.import-form-input:focus {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--ink-ring);
+}
+
+.import-form-path {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--stone-500);
+  padding-left: 60px;
+  word-break: break-all;
+}
+
+.import-form-banner {
+  font-size: 0.76rem;
+  line-height: 1.4;
+  padding: 0.4rem 0.55rem;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+
+.import-form-banner.info {
+  background: var(--ink-soft);
+  color: var(--ink);
+  border-color: transparent;
+}
+
+.import-form-banner.update {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.import-form-banner.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.import-form-banner.error {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.import-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+}
+
+.import-form-cancel,
+.import-form-confirm {
+  padding: 0.35rem 0.7rem;
+  border-radius: 3px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.import-form-cancel {
+  background: transparent;
+  color: var(--stone-700);
+  border: 1px solid var(--stone-200);
+}
+
+.import-form-cancel:hover:not(:disabled) {
+  border-color: var(--stone-300);
+  color: var(--stone-900);
+}
+
+.import-form-confirm {
+  background: var(--ink);
+  color: var(--stone-50);
+  border: 1px solid var(--ink);
+}
+
+.import-form-confirm:hover:not(:disabled) {
+  background: var(--ink-strong);
+  border-color: var(--ink-strong);
+}
+
+.import-form-confirm.destructive {
+  background: var(--bad);
+  border-color: var(--bad);
+}
+
+.import-form-confirm.destructive:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--bad) 80%, oklch(0.2 0.05 25));
+  border-color: color-mix(in oklch, var(--bad) 80%, oklch(0.2 0.05 25));
+}
+
+.import-form-confirm.destructive-mild {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: var(--stone-50);
+}
+
+.import-form-confirm.destructive-mild:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--warn) 80%, oklch(0.3 0.08 75));
+  border-color: color-mix(in oklch, var(--warn) 80%, oklch(0.3 0.08 75));
+}
+
+.import-form-cancel:disabled,
+.import-form-confirm:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .request-list-content {
   flex: 1;
   overflow-y: auto;

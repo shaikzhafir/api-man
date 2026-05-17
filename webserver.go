@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,6 +70,7 @@ func (ws *WebServer) Start() error {
 	http.HandleFunc("/api/collection-environments/", ws.handleCollectionEnvironments)
 	http.HandleFunc("/api/requests", ws.handleRequests)
 	http.HandleFunc("/api/request/", ws.handleRequestDetails)
+	http.HandleFunc("/api/openapi-preview", ws.handleOpenAPIPreview)
 	http.HandleFunc("/api/import-openapi", ws.handleImportOpenAPI)
 	http.HandleFunc("/api/execute", ws.handleExecute)
 
@@ -202,7 +204,7 @@ func (ws *WebServer) handleRequestDetails(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(config)
 }
 
-func (ws *WebServer) handleImportOpenAPI(w http.ResponseWriter, r *http.Request) {
+func (ws *WebServer) handleOpenAPIPreview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -236,14 +238,100 @@ func (ws *WebServer) handleImportOpenAPI(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	result, err := ws.cm.ImportRequestsFromOpenAPI(spec)
+	preview := ws.cm.PreviewOpenAPI(spec, strings.TrimSpace(r.FormValue("collection")))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(preview)
+}
+
+func (ws *WebServer) handleImportOpenAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseMultipartForm(20 << 20); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid multipart upload: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("spec")
 	if err != nil {
+		http.Error(w, "OpenAPI spec file is required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(io.LimitReader(file, 20<<20))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error reading upload: %v", err), http.StatusBadRequest)
+		return
+	}
+	if len(data) == 0 {
+		http.Error(w, "OpenAPI spec file is empty", http.StatusBadRequest)
+		return
+	}
+
+	spec, err := LoadOpenAPISpecFromData(data)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error loading OpenAPI spec: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	opts := ImportOptions{
+		OverrideName: strings.TrimSpace(r.FormValue("collection")),
+		Overwrite:    r.FormValue("overwrite") == "true",
+	}
+
+	result, err := ws.cm.ImportRequestsFromOpenAPI(spec, opts)
+	if err != nil {
+		var existsErr *CollectionExistsError
+		if errors.As(err, &existsErr) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error":               "collection_exists",
+				"suggestedCollection": existsErr.Name,
+				"message":             fmt.Sprintf("Collection %q already exists. Choose a different name or overwrite.", existsErr.Name),
+			})
+			return
+		}
 		http.Error(w, fmt.Sprintf("Error importing requests: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	specPath, specErr := ws.cm.SaveCollectionSpec(result.Collection, data, detectSpecExt(header.Filename, data))
+	if specErr != nil {
+		// Generated files succeeded; failure to persist the source spec is non-fatal.
+		fmt.Printf("warning: failed to save source spec for %s: %v\n", result.Collection, specErr)
+	} else {
+		result.SpecPath = specPath
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// detectSpecExt picks "yaml" or "json" based on the uploaded filename, falling
+// back to a peek at the first non-whitespace byte if the extension is missing
+// or unrecognized.
+func detectSpecExt(name string, data []byte) string {
+	lname := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lname, ".json"):
+		return "json"
+	case strings.HasSuffix(lname, ".yaml"), strings.HasSuffix(lname, ".yml"):
+		return "yaml"
+	}
+	for _, b := range data {
+		switch b {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case '{', '[':
+			return "json"
+		}
+		break
+	}
+	return "yaml"
 }
 
 func (ws *WebServer) handleExecute(w http.ResponseWriter, r *http.Request) {

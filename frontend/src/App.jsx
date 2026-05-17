@@ -71,18 +71,43 @@ function App() {
     }
   }
 
-  const handleImportOpenAPI = async (file) => {
+  const previewOpenAPI = async (file, collection = '') => {
+    const formData = new FormData()
+    formData.append('spec', file)
+    if (collection) formData.append('collection', collection)
+    const res = await fetch('/api/openapi-preview', { method: 'POST', body: formData })
+    if (!res.ok) {
+      const message = await res.text()
+      throw new Error(message.trim() || 'Preview failed')
+    }
+    return await res.json()
+  }
+
+  const handleImportOpenAPI = async ({ file, collection = '', overwrite = false }) => {
     if (!file) return
 
     setImportStatus({ type: 'loading', message: `Importing ${file.name}...` })
     const formData = new FormData()
     formData.append('spec', file)
+    if (collection) formData.append('collection', collection)
+    if (overwrite) formData.append('overwrite', 'true')
 
     try {
       const res = await fetch('/api/import-openapi', {
         method: 'POST',
         body: formData,
       })
+
+      if (res.status === 409) {
+        const conflict = await res.json().catch(() => ({}))
+        setImportStatus({
+          type: 'conflict',
+          file,
+          collection: conflict.suggestedCollection || collection,
+          message: conflict.message || 'Collection already exists.',
+        })
+        return
+      }
 
       if (!res.ok) {
         const message = await res.text()
@@ -98,14 +123,19 @@ function App() {
 
       setActiveCollection(result.collection)
       loadCollectionEnvs(result.collection)
+      const parts = [`Imported ${result.imported} requests into ${result.collection}`]
+      if (result.pruned) parts.push(`pruned ${result.pruned} stale`)
+      if (result.specPath) parts.push(`spec saved to ${result.specPath}`)
       setImportStatus({
         type: 'success',
-        message: `Imported ${result.imported} requests into ${result.collection}`,
+        message: parts.join('. ') + '.',
       })
     } catch (error) {
       setImportStatus({ type: 'error', message: error.message })
     }
   }
+
+  const handleClearImportStatus = () => setImportStatus(null)
 
   const handleSaveCollectionEnvs = async (updatedEnvs) => {
     if (!activeCollection) return
@@ -197,6 +227,8 @@ function App() {
             onRequestSelect={handleRequestSelect}
             selectedRequest={selectedRequest}
             onImportOpenAPI={handleImportOpenAPI}
+            onPreviewOpenAPI={previewOpenAPI}
+            onClearImportStatus={handleClearImportStatus}
             importStatus={importStatus}
           />
         </div>

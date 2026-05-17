@@ -1,13 +1,61 @@
 import { useState, useEffect } from 'react'
 
-function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenAPI, importStatus }) {
+function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenAPI, onPreviewOpenAPI, onClearImportStatus, importStatus }) {
   const [expandedFolders, setExpandedFolders] = useState(new Set())
   const [searchTerm, setSearchTerm] = useState('')
+  const [pendingFile, setPendingFile] = useState(null)
+  const [pendingCollection, setPendingCollection] = useState('')
+  const [pendingPreview, setPendingPreview] = useState(null)
+  const [previewError, setPreviewError] = useState('')
   const importInputId = 'openapi-import-input'
 
   useEffect(() => {
     setExpandedFolders(new Set(Object.keys(requests)))
   }, [requests])
+
+  useEffect(() => {
+    if (importStatus?.type === 'success') {
+      setPendingFile(null)
+      setPendingCollection('')
+      setPendingPreview(null)
+      setPreviewError('')
+    }
+  }, [importStatus])
+
+  const handleFilePicked = async (file) => {
+    if (!file) return
+    setPendingFile(file)
+    setPendingCollection('')
+    setPendingPreview(null)
+    setPreviewError('')
+    onClearImportStatus?.()
+    try {
+      const preview = await onPreviewOpenAPI?.(file)
+      if (preview) {
+        setPendingPreview(preview)
+        setPendingCollection(preview.suggestedCollection || '')
+      }
+    } catch (err) {
+      setPreviewError(err.message || 'Could not parse spec.')
+    }
+  }
+
+  const handleCancelImport = () => {
+    setPendingFile(null)
+    setPendingCollection('')
+    setPendingPreview(null)
+    setPreviewError('')
+    onClearImportStatus?.()
+  }
+
+  const handleConfirmImport = (overwrite = false) => {
+    if (!pendingFile) return
+    onImportOpenAPI({
+      file: pendingFile,
+      collection: pendingCollection,
+      overwrite,
+    })
+  }
 
   const toggleFolder = (folder) => {
     const newExpanded = new Set(expandedFolders)
@@ -84,7 +132,7 @@ function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenA
             disabled={importStatus?.type === 'loading'}
             onChange={(e) => {
               const file = e.target.files?.[0]
-              onImportOpenAPI(file)
+              handleFilePicked(file)
               e.target.value = ''
             }}
           />
@@ -96,7 +144,150 @@ function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenA
           className="request-search"
           placeholder="Search requests"
         />
-        {importStatus?.message && (
+
+        {pendingFile && importStatus?.type !== 'conflict' && (
+          <div className="import-form">
+            <div className="import-form-row">
+              <span className="import-form-label">File</span>
+              <span className="import-form-value">{pendingFile.name}</span>
+            </div>
+            <label className="import-form-row import-form-name">
+              <span className="import-form-label">Collection</span>
+              <input
+                type="text"
+                className="import-form-input"
+                value={pendingCollection}
+                onChange={(e) => setPendingCollection(e.target.value)}
+                placeholder={pendingPreview?.suggestedCollection || 'collection-name'}
+                spellCheck={false}
+                autoFocus
+                disabled={importStatus?.type === 'loading'}
+              />
+            </label>
+            <div className="import-form-path">
+              requests/{pendingCollection || pendingPreview?.suggestedCollection || 'api'}/
+            </div>
+
+            {previewError && (
+              <div className="import-form-banner error">{previewError}</div>
+            )}
+            {pendingPreview && (() => {
+              const name = pendingCollection.trim() || pendingPreview.suggestedCollection
+              const matchesSuggestion = name === pendingPreview.suggestedCollection
+              const opLabel = `${pendingPreview.operations} operation${pendingPreview.operations === 1 ? '' : 's'}`
+
+              if (matchesSuggestion && pendingPreview.exists && pendingPreview.ownedBySpec) {
+                return (
+                  <div className="import-form-banner update">
+                    Overwriting spec-owned collection. {opLabel}. Generated requests will be rewritten; operations no longer in this spec will be pruned.
+                  </div>
+                )
+              }
+              if (matchesSuggestion && pendingPreview.exists && !pendingPreview.ownedBySpec) {
+                return (
+                  <div className="import-form-banner warn">
+                    Folder exists but isn't spec-owned. Rename, or confirm overwrite on submit.
+                  </div>
+                )
+              }
+              if (!matchesSuggestion) {
+                return (
+                  <div className="import-form-banner info">
+                    New folder. {opLabel}. Server will confirm if the renamed target collides.
+                  </div>
+                )
+              }
+              return (
+                <div className="import-form-banner info">
+                  New collection. {opLabel}.
+                </div>
+              )
+            })()}
+
+            {(() => {
+              const name = pendingCollection.trim() || pendingPreview?.suggestedCollection
+              const matchesSuggestion = pendingPreview && name === pendingPreview.suggestedCollection
+              const isUpdate = matchesSuggestion && pendingPreview.exists && pendingPreview.ownedBySpec
+              const confirmClass = isUpdate
+                ? 'import-form-confirm destructive-mild'
+                : 'import-form-confirm'
+              const confirmLabel = importStatus?.type === 'loading'
+                ? 'Importing...'
+                : isUpdate
+                ? 'Update'
+                : 'Import'
+              return (
+                <div className="import-form-actions">
+                  <button
+                    className="import-form-cancel"
+                    onClick={handleCancelImport}
+                    disabled={importStatus?.type === 'loading'}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className={confirmClass}
+                    onClick={() => handleConfirmImport(false)}
+                    disabled={!pendingCollection.trim() || importStatus?.type === 'loading' || !!previewError}
+                    type="button"
+                    title={isUpdate ? 'Rewrites generated requests and prunes operations no longer in this spec' : undefined}
+                  >
+                    {confirmLabel}
+                  </button>
+                </div>
+              )
+            })()}
+          </div>
+        )}
+
+        {importStatus?.type === 'conflict' && (
+          <div className="import-status conflict">
+            <div className="import-status-message">{importStatus.message}</div>
+            <div className="import-form-row import-form-name">
+              <span className="import-form-label">Rename</span>
+              <input
+                type="text"
+                className="import-form-input"
+                value={pendingCollection}
+                onChange={(e) => setPendingCollection(e.target.value)}
+                spellCheck={false}
+                autoFocus
+              />
+            </div>
+            <div className="import-form-path">
+              requests/{pendingCollection || 'api'}/
+            </div>
+            <div className="import-form-actions">
+              <button
+                className="import-form-cancel"
+                onClick={handleCancelImport}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="import-form-confirm destructive"
+                onClick={() => handleConfirmImport(true)}
+                type="button"
+                title="Wipes the existing folder, including hand-rolled requests that are not in this spec"
+              >
+                Overwrite
+              </button>
+              <button
+                className="import-form-confirm"
+                onClick={() => handleConfirmImport(false)}
+                disabled={!pendingCollection.trim() || pendingCollection === importStatus.collection}
+                type="button"
+                title="Import using the new collection name"
+              >
+                Import as new
+              </button>
+            </div>
+          </div>
+        )}
+
+        {importStatus?.message && importStatus.type !== 'conflict' && importStatus.type !== 'loading' && (
           <div className={`import-status ${importStatus.type}`}>
             {importStatus.message}
           </div>

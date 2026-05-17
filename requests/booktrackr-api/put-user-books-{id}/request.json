@@ -1,9 +1,0 @@
-{
-  "url": "/user/books/{id}",
-  "headers": {
-    "Content-Type": "application/json"
-  },
-  "body": "{\n  \"example\": \"data\"\n}",
-  "method": "PUT",
-  "name": "put-user-books-{id}"
-}

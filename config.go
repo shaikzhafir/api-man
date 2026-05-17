@@ -45,6 +45,36 @@ type ConfigManager struct {
 type OpenAPIImportResult struct {
 	Collection string `json:"collection"`
 	Imported   int    `json:"imported"`
+	Pruned     int    `json:"pruned,omitempty"`
+	SpecPath   string `json:"specPath,omitempty"`
+}
+
+// OpenAPIPreview describes what would happen if a spec were imported,
+// without writing anything to disk.
+type OpenAPIPreview struct {
+	SuggestedCollection string `json:"suggestedCollection"`
+	Exists              bool   `json:"exists"`
+	OwnedBySpec         bool   `json:"ownedBySpec"`
+	Operations          int    `json:"operations"`
+}
+
+// ImportOptions controls OpenAPI import behavior.
+type ImportOptions struct {
+	// OverrideName replaces the auto-derived collection folder name when non-empty.
+	OverrideName string
+	// Overwrite permits importing into an existing collection folder.
+	// When false, attempts to import into an existing folder return CollectionExistsError.
+	Overwrite bool
+}
+
+// CollectionExistsError is returned when the target collection folder already
+// exists and the caller did not request overwrite.
+type CollectionExistsError struct {
+	Name string
+}
+
+func (e *CollectionExistsError) Error() string {
+	return fmt.Sprintf("collection %q already exists", e.Name)
 }
 
 func NewConfigManager() (*ConfigManager, error) {
@@ -223,7 +253,8 @@ func (cm *ConfigManager) ListRequests() (map[string][]string, error) {
 			return nil
 		}
 
-		if d.Name() == "environments.json" {
+		switch d.Name() {
+		case "environments.json", "openapi.json", "openapi.yaml", "openapi.yml":
 			return nil
 		}
 
@@ -557,6 +588,43 @@ func (cm *ConfigManager) SaveCollectionEnvironments(collection string, ce *Colle
 	return nil
 }
 
+// SaveCollectionSpec writes the source OpenAPI spec into the collection
+// folder so the generated request files have a visible, on-disk origin.
+// The ext argument should be "yaml" or "json"; the file lands at
+// requests/<collection>/openapi.<ext>. Any previous spec file in either
+// format is removed so re-imports don't leave stale variants behind.
+func (cm *ConfigManager) SaveCollectionSpec(collection string, data []byte, ext string) (string, error) {
+	if collection == "" {
+		return "", fmt.Errorf("collection name is required")
+	}
+	ext = strings.ToLower(strings.TrimPrefix(ext, "."))
+	if ext != "yaml" && ext != "yml" && ext != "json" {
+		ext = "yaml"
+	}
+
+	dir := filepath.Join(cm.requestsDir, collection)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("creating collection directory: %w", err)
+	}
+
+	// Remove any prior spec variants so the collection holds exactly one canonical source.
+	for _, variant := range []string{"openapi.yaml", "openapi.yml", "openapi.json"} {
+		_ = os.Remove(filepath.Join(dir, variant))
+	}
+
+	filename := "openapi." + ext
+	filePath := filepath.Join(dir, filename)
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		return "", fmt.Errorf("writing spec file: %w", err)
+	}
+
+	rel, err := filepath.Rel(cm.configDir, filePath)
+	if err != nil {
+		return filePath, nil
+	}
+	return rel, nil
+}
+
 // ResolveEnvironment returns the collection-specific environment if it exists,
 // otherwise falls back to the global environment.
 func (cm *ConfigManager) ResolveEnvironment(collection, envName string) (*Environment, error) {
@@ -572,24 +640,43 @@ func (cm *ConfigManager) ResolveEnvironment(collection, envName string) (*Enviro
 }
 
 // GenerateRequestsFromOpenAPI generates request configs from OpenAPI spec.
+// CLI semantics: regenerate-on-spec-change, so existing folders are overwritten.
 func (cm *ConfigManager) GenerateRequestsFromOpenAPI(spec *openapi3.T) error {
-	_, err := cm.ImportRequestsFromOpenAPI(spec)
+	_, err := cm.ImportRequestsFromOpenAPI(spec, ImportOptions{Overwrite: true})
 	return err
 }
 
-// ImportRequestsFromOpenAPI creates a collection folder from an OpenAPI spec and
-// returns the generated collection name plus imported operation count.
-func (cm *ConfigManager) ImportRequestsFromOpenAPI(spec *openapi3.T) (*OpenAPIImportResult, error) {
-	// First, create a main folder based on the OpenAPI spec info
+// ImportRequestsFromOpenAPI creates or updates a collection folder from an
+// OpenAPI spec. The folder name defaults to the sanitized spec title; supply
+// opts.OverrideName to choose a different folder.
+//
+// Conflict policy: a folder containing an openapi.{yaml,yml,json} file is
+// considered "spec-owned" and is merged in place silently. A folder without
+// such a file is treated as foreign; the import returns CollectionExistsError
+// unless opts.Overwrite is true.
+//
+// Merge policy: every operation in the spec rewrites its <op>/request.json.
+// Sibling files inside an operation folder (body templates) are preserved.
+// Operation folders not present in the new spec are pruned entirely.
+func (cm *ConfigManager) ImportRequestsFromOpenAPI(spec *openapi3.T, opts ImportOptions) (*OpenAPIImportResult, error) {
 	specTitle := OpenAPICollectionName(spec)
+	if strings.TrimSpace(opts.OverrideName) != "" {
+		specTitle = sanitizeRequestPathSegment(opts.OverrideName)
+	}
 
 	specDir := filepath.Join(cm.requestsDir, specTitle)
+	exists, ownedBySpec := inspectCollectionDir(specDir)
+	if exists && !ownedBySpec && !opts.Overwrite {
+		return nil, &CollectionExistsError{Name: specTitle}
+	}
+
 	err := os.MkdirAll(specDir, 0755)
 	if err != nil {
 		return nil, fmt.Errorf("creating spec directory %s: %w", specDir, err)
 	}
 
 	imported := 0
+	writtenOps := make(map[string]struct{})
 	for path, pathItem := range spec.Paths.Map() {
 		// Generate request for each operation
 		operations := map[string]*openapi3.Operation{
@@ -674,11 +761,99 @@ func (cm *ConfigManager) ImportRequestsFromOpenAPI(spec *openapi3.T) (*OpenAPIIm
 			if err != nil {
 				return nil, fmt.Errorf("writing request file %s: %w", requestFile, err)
 			}
+			writtenOps[requestName] = struct{}{}
 			imported++
 		}
 	}
 
-	return &OpenAPIImportResult{Collection: specTitle, Imported: imported}, nil
+	pruned, perr := pruneStaleOperations(specDir, writtenOps)
+	if perr != nil {
+		return nil, fmt.Errorf("pruning stale operations: %w", perr)
+	}
+
+	return &OpenAPIImportResult{Collection: specTitle, Imported: imported, Pruned: pruned}, nil
+}
+
+// inspectCollectionDir reports whether the directory exists and, if so,
+// whether it carries a sibling openapi.{yaml,yml,json} file marking it as
+// spec-owned.
+func inspectCollectionDir(dir string) (exists bool, ownedBySpec bool) {
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return false, false
+	}
+	for _, variant := range []string{"openapi.yaml", "openapi.yml", "openapi.json"} {
+		if _, err := os.Stat(filepath.Join(dir, variant)); err == nil {
+			return true, true
+		}
+	}
+	return true, false
+}
+
+// pruneStaleOperations removes operation subdirectories under collectionDir
+// whose name is not in writtenOps. A subdirectory is treated as an operation
+// folder only when it contains a request.json file.
+func pruneStaleOperations(collectionDir string, writtenOps map[string]struct{}) (int, error) {
+	entries, err := os.ReadDir(collectionDir)
+	if err != nil {
+		return 0, fmt.Errorf("reading collection directory: %w", err)
+	}
+
+	pruned := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, kept := writtenOps[entry.Name()]; kept {
+			continue
+		}
+		opDir := filepath.Join(collectionDir, entry.Name())
+		if _, err := os.Stat(filepath.Join(opDir, "request.json")); err != nil {
+			// Not an operation folder (no request.json). Leave it alone.
+			continue
+		}
+		if err := os.RemoveAll(opDir); err != nil {
+			return pruned, fmt.Errorf("removing %s: %w", opDir, err)
+		}
+		pruned++
+	}
+	return pruned, nil
+}
+
+// PreviewOpenAPI parses an OpenAPI document and reports what an import would
+// do, without touching disk. overrideName, when non-empty, replaces the
+// default folder name derived from spec.info.title.
+func (cm *ConfigManager) PreviewOpenAPI(spec *openapi3.T, overrideName string) *OpenAPIPreview {
+	name := OpenAPICollectionName(spec)
+	if strings.TrimSpace(overrideName) != "" {
+		name = sanitizeRequestPathSegment(overrideName)
+	}
+
+	exists, ownedBySpec := inspectCollectionDir(filepath.Join(cm.requestsDir, name))
+
+	operations := 0
+	if spec.Paths != nil {
+		for _, pathItem := range spec.Paths.Map() {
+			if pathItem == nil {
+				continue
+			}
+			for _, op := range []*openapi3.Operation{
+				pathItem.Get, pathItem.Head, pathItem.Post, pathItem.Put,
+				pathItem.Delete, pathItem.Options, pathItem.Patch,
+			} {
+				if op != nil {
+					operations++
+				}
+			}
+		}
+	}
+
+	return &OpenAPIPreview{
+		SuggestedCollection: name,
+		Exists:              exists,
+		OwnedBySpec:         ownedBySpec,
+		Operations:          operations,
+	}
 }
 
 func defaultParameterValue(parameter *openapi3.Parameter) string {
