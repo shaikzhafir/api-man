@@ -1,0 +1,9 @@
+{
+  "url": "/api/suggestions/{id}",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\n  \"example\": \"data\"\n}",
+  "method": "PATCH",
+  "name": "patchapisuggestionsbyid"
+}

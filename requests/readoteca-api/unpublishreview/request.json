@@ -1,0 +1,7 @@
+{
+  "url": "/library/{id}/review/publish",
+  "headers": {},
+  "body": "",
+  "method": "DELETE",
+  "name": "unpublishreview"
+}

@@ -1,0 +1,7 @@
+{
+  "url": "/api/suggestions/{id}/proof",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "getapisuggestionsbyidproof"
+}

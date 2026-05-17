@@ -1,0 +1,73 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  /* Tinted warm-stone neutrals. Hue ~80° (warm). Chroma stays low at extremes. */
+  --stone-50:  oklch(0.985 0.005 80);
+  --stone-100: oklch(0.970 0.006 80);
+  --stone-150: oklch(0.950 0.007 80);
+  --stone-200: oklch(0.920 0.008 80);
+  --stone-300: oklch(0.850 0.010 80);
+  --stone-500: oklch(0.555 0.012 80);
+  --stone-700: oklch(0.360 0.015 80);
+  --stone-900: oklch(0.200 0.020 80);
+
+  /* The one accent. Muted ink-slate. Not Postman orange, not Bootstrap blue, not neon. */
+  --ink:        oklch(0.38 0.060 250);
+  --ink-strong: oklch(0.28 0.070 250);
+  --ink-soft:   color-mix(in oklch, oklch(0.38 0.060 250) 9%, transparent);
+  --ink-ring:   color-mix(in oklch, oklch(0.38 0.060 250) 30%, transparent);
+
+  /* Semantic colors. Used only for meaningful state: status code, destructive verb, error. */
+  --ok:        oklch(0.50 0.09 150);
+  --ok-soft:   color-mix(in oklch, oklch(0.50 0.09 150) 12%, transparent);
+  --warn:      oklch(0.60 0.13 75);
+  --warn-soft: color-mix(in oklch, oklch(0.60 0.13 75) 13%, transparent);
+  --bad:       oklch(0.50 0.13 25);
+  --bad-soft:  color-mix(in oklch, oklch(0.50 0.13 25) 11%, transparent);
+
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--stone-900);
+  background-color: var(--stone-100);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  height: 100vh;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input, select, textarea {
+  font-family: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

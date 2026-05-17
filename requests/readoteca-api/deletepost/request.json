@@ -1,0 +1,7 @@
+{
+  "url": "/posts/{id}",
+  "headers": {},
+  "body": "",
+  "method": "DELETE",
+  "name": "deletepost"
+}

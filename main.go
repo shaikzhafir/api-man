@@ -2,13 +2,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
-	"io"
-	"encoding/json"
-	"strings"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -49,6 +49,17 @@ func main() {
 		runTUI(os.Args[2])
 	case "body":
 		handleBodyCommand()
+	case "web":
+		if len(os.Args) < 3 {
+			runWebServer("3000", "./frontend/dist")
+		} else {
+			port := os.Args[2]
+			staticDir := "./frontend/dist"
+			if len(os.Args) > 3 {
+				staticDir = os.Args[3]
+			}
+			runWebServer(port, staticDir)
+		}
 	default:
 		// Legacy mode - if the argument is a yaml file, run TUI
 		if len(os.Args) == 2 && (endsWith(os.Args[1], ".yaml") || endsWith(os.Args[1], ".yml")) {
@@ -70,6 +81,7 @@ func printUsage() {
 	fmt.Println("  api-man list                           List all available requests")
 	fmt.Println("  api-man envs                           List all available environments")
 	fmt.Println("  api-man tui <spec.yaml>                Run TUI mode with OpenAPI spec")
+	fmt.Println("  api-man web [port] [static-dir]        Start web server (default: port 3000, ./frontend/dist)")
 	fmt.Println("  api-man body <command> [args]          Manage JSON body templates")
 	fmt.Println()
 	fmt.Println("Body commands:")
@@ -81,6 +93,7 @@ func printUsage() {
 	fmt.Println("  api-man init")
 	fmt.Println("  api-man generate openapi.yaml")
 	fmt.Println("  api-man run users/get-users dev")
+	fmt.Println("  api-man web 8080")
 	fmt.Println("  api-man body list users/post-user")
 	fmt.Println("  api-man body set users/post-user admin")
 }
@@ -90,7 +103,7 @@ func initializeWorkspace() {
 	if err != nil {
 		log.Fatal("Error initializing workspace:", err)
 	}
-	
+
 	fmt.Println("✓ Initialized API-Man workspace")
 	fmt.Printf("✓ Created directories: %s\n", cm.configDir)
 	fmt.Println("✓ Generated default environments (dev, prod)")
@@ -145,7 +158,7 @@ func runRequest(requestPath, envName string) {
 		}
 	}
 	fmt.Printf("\nResponse Body:\n")
-	
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatal("Error reading response body:", err)
@@ -284,7 +297,7 @@ func listBodies(cm *ConfigManager, requestPath string) {
 	}
 
 	fmt.Printf("Body JSON files for %s:\n\n", requestPath)
-	
+
 	if len(bodyFiles) == 0 {
 		fmt.Println("No body JSON files found.")
 		fmt.Println("You can create body files like 'admin.json', 'test.json', etc. in this directory.")
@@ -297,7 +310,7 @@ func listBodies(cm *ConfigManager, requestPath string) {
 			marker = "●"
 		}
 		fmt.Printf("%s %s.json\n", marker, name)
-		
+
 		// Show first line of content as preview
 		requestDir := filepath.Join("requests", requestPath)
 		bodyFilePath := filepath.Join(requestDir, name+".json")
@@ -313,14 +326,13 @@ func listBodies(cm *ConfigManager, requestPath string) {
 		}
 		fmt.Println()
 	}
-	
+
 	if activeBody != "" {
 		fmt.Printf("Active body file: %s.json\n", activeBody)
 	} else {
 		fmt.Printf("Using default body from request.json\n")
 	}
 }
-
 
 func setActiveBody(cm *ConfigManager, requestPath, bodyName string) {
 	err := cm.SetActiveBody(requestPath, bodyName)
@@ -338,4 +350,16 @@ func removeBody(cm *ConfigManager, requestPath, bodyName string) {
 	}
 
 	fmt.Printf("✓ Removed body template '%s' from %s\n", bodyName, requestPath)
+}
+
+func runWebServer(port, staticDir string) {
+	server, err := NewWebServer(port, staticDir)
+	if err != nil {
+		log.Fatal("Error creating web server:", err)
+	}
+
+	err = server.Start()
+	if err != nil {
+		log.Fatal("Error starting web server:", err)
+	}
 }

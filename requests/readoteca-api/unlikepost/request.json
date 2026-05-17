@@ -1,0 +1,7 @@
+{
+  "url": "/posts/{id}/like",
+  "headers": {},
+  "body": "",
+  "method": "DELETE",
+  "name": "unlikepost"
+}

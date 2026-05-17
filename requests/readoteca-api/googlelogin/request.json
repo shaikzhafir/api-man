@@ -1,0 +1,10 @@
+{
+  "url": "/google/login",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "googlelogin",
+  "params": {
+    "next": ""
+  }
+}

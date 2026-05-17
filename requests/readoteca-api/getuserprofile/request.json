@@ -1,0 +1,7 @@
+{
+  "url": "/users/{id}",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "getuserprofile"
+}

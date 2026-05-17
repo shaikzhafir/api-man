@@ -1,0 +1,9 @@
+{
+  "url": "/api/auth/logout",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "",
+  "method": "POST",
+  "name": "postapiauthlogout"
+}

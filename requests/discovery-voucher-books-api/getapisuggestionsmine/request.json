@@ -1,0 +1,7 @@
+{
+  "url": "/api/suggestions/mine",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "getapisuggestionsmine"
+}

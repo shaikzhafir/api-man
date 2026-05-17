@@ -1,0 +1,10 @@
+{
+  "url": "/books/search",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "searchbooks",
+  "params": {
+    "q": ""
+  }
+}

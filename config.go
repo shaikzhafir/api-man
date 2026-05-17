@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -39,6 +40,11 @@ type ConfigManager struct {
 	configDir       string
 	requestsDir     string
 	environmentsDir string
+}
+
+type OpenAPIImportResult struct {
+	Collection string `json:"collection"`
+	Imported   int    `json:"imported"`
 }
 
 func NewConfigManager() (*ConfigManager, error) {
@@ -148,7 +154,7 @@ func (cm *ConfigManager) initializeDefaultFiles() error {
 func (cm *ConfigManager) SaveRequest(path string, config RequestConfig) error {
 	// Determine if we're using the new subdirectory structure or old flat structure
 	filePath := filepath.Join(cm.requestsDir, path+".json")
-	
+
 	// Check if subdirectory structure exists
 	subdirPath := filepath.Join(cm.requestsDir, path, "request.json")
 	if _, err := os.Stat(filepath.Join(cm.requestsDir, path)); err == nil {
@@ -180,7 +186,7 @@ func (cm *ConfigManager) SaveRequest(path string, config RequestConfig) error {
 func (cm *ConfigManager) LoadRequest(path string) (*RequestConfig, error) {
 	// Try both formats: direct .json file and subdirectory/request.json
 	filePath := filepath.Join(cm.requestsDir, path+".json")
-	
+
 	// If the .json file doesn't exist, try looking for request.json in a subdirectory
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		filePath = filepath.Join(cm.requestsDir, path, "request.json")
@@ -217,6 +223,10 @@ func (cm *ConfigManager) ListRequests() (map[string][]string, error) {
 			return nil
 		}
 
+		if d.Name() == "environments.json" {
+			return nil
+		}
+
 		// Get relative path from requests directory
 		relPath, err := filepath.Rel(cm.requestsDir, path)
 		if err != nil {
@@ -226,13 +236,16 @@ func (cm *ConfigManager) ListRequests() (map[string][]string, error) {
 		// Remove .json extension
 		relPath = strings.TrimSuffix(relPath, ".json")
 
-		// Get directory name
-		dir := filepath.Dir(relPath)
-		if dir == "." {
-			dir = "root"
+		// Group by top-level folder (the yaml-spec folder)
+		parts := strings.Split(relPath, string(filepath.Separator))
+		var topLevel string
+		if len(parts) <= 1 {
+			topLevel = "root"
+		} else {
+			topLevel = parts[0]
 		}
 
-		requests[dir] = append(requests[dir], relPath)
+		requests[topLevel] = append(requests[topLevel], relPath)
 
 		return nil
 	})
@@ -518,7 +531,7 @@ func (cm *ConfigManager) SetActiveBody(requestPath, bodyName string) error {
 	// Check if the body file exists
 	requestDir := filepath.Join(cm.requestsDir, requestPath)
 	bodyFilePath := filepath.Join(requestDir, bodyName+".json")
-	
+
 	if _, err := os.Stat(bodyFilePath); os.IsNotExist(err) {
 		return fmt.Errorf("body file '%s.json' does not exist in %s", bodyName, requestPath)
 	}
@@ -537,7 +550,7 @@ func (cm *ConfigManager) ListBodies(requestPath string) ([]string, string, error
 	// Look for JSON files in the request directory (excluding request.json)
 	requestDir := filepath.Join(cm.requestsDir, requestPath)
 	var bodyFiles []string
-	
+
 	if entries, err := os.ReadDir(requestDir); err == nil {
 		for _, entry := range entries {
 			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") && entry.Name() != "request.json" {
@@ -554,7 +567,7 @@ func (cm *ConfigManager) ListBodies(requestPath string) ([]string, string, error
 func (cm *ConfigManager) RemoveBody(requestPath, bodyName string) error {
 	requestDir := filepath.Join(cm.requestsDir, requestPath)
 	bodyFilePath := filepath.Join(requestDir, bodyName+".json")
-	
+
 	if _, err := os.Stat(bodyFilePath); os.IsNotExist(err) {
 		return fmt.Errorf("body file '%s.json' does not exist", bodyName)
 	}
@@ -578,30 +591,97 @@ func (cm *ConfigManager) RemoveBody(requestPath, bodyName string) error {
 	return nil
 }
 
-// GenerateRequestsFromOpenAPI generates request configs from OpenAPI spec
-// Creates a folder structure based on the OpenAPI spec, then for each request,
-// creates a separate folder containing a JSON file with URL, headers, and body info
-func (cm *ConfigManager) GenerateRequestsFromOpenAPI(spec *openapi3.T) error {
-	// First, create a main folder based on the OpenAPI spec info
-	specTitle := "api"
-	if spec.Info != nil && spec.Info.Title != "" {
-		specTitle = strings.ToLower(strings.ReplaceAll(spec.Info.Title, " ", "-"))
+// CollectionEnvironments holds per-collection environment overrides.
+// Stored as requests/<collection>/environments.json
+type CollectionEnvironments struct {
+	Environments map[string]Environment `json:"environments"`
+}
+
+// LoadCollectionEnvironments loads the per-collection environments file.
+// Returns an empty map (not an error) if the file doesn't exist yet.
+func (cm *ConfigManager) LoadCollectionEnvironments(collection string) (*CollectionEnvironments, error) {
+	filePath := filepath.Join(cm.requestsDir, collection, "environments.json")
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &CollectionEnvironments{Environments: make(map[string]Environment)}, nil
+		}
+		return nil, fmt.Errorf("reading collection environments: %w", err)
 	}
+
+	var ce CollectionEnvironments
+	if err := json.Unmarshal(data, &ce); err != nil {
+		return nil, fmt.Errorf("parsing collection environments: %w", err)
+	}
+	if ce.Environments == nil {
+		ce.Environments = make(map[string]Environment)
+	}
+	return &ce, nil
+}
+
+// SaveCollectionEnvironments persists the per-collection environments file.
+func (cm *ConfigManager) SaveCollectionEnvironments(collection string, ce *CollectionEnvironments) error {
+	dir := filepath.Join(cm.requestsDir, collection)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("creating collection directory: %w", err)
+	}
+
+	data, err := json.MarshalIndent(ce, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling collection environments: %w", err)
+	}
+
+	filePath := filepath.Join(dir, "environments.json")
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		return fmt.Errorf("writing collection environments: %w", err)
+	}
+	return nil
+}
+
+// ResolveEnvironment returns the collection-specific environment if it exists,
+// otherwise falls back to the global environment.
+func (cm *ConfigManager) ResolveEnvironment(collection, envName string) (*Environment, error) {
+	if collection != "" {
+		ce, err := cm.LoadCollectionEnvironments(collection)
+		if err == nil {
+			if env, ok := ce.Environments[envName]; ok {
+				return &env, nil
+			}
+		}
+	}
+	return cm.LoadEnvironment(envName)
+}
+
+// GenerateRequestsFromOpenAPI generates request configs from OpenAPI spec.
+func (cm *ConfigManager) GenerateRequestsFromOpenAPI(spec *openapi3.T) error {
+	_, err := cm.ImportRequestsFromOpenAPI(spec)
+	return err
+}
+
+// ImportRequestsFromOpenAPI creates a collection folder from an OpenAPI spec and
+// returns the generated collection name plus imported operation count.
+func (cm *ConfigManager) ImportRequestsFromOpenAPI(spec *openapi3.T) (*OpenAPIImportResult, error) {
+	// First, create a main folder based on the OpenAPI spec info
+	specTitle := OpenAPICollectionName(spec)
 
 	specDir := filepath.Join(cm.requestsDir, specTitle)
 	err := os.MkdirAll(specDir, 0755)
 	if err != nil {
-		return fmt.Errorf("creating spec directory %s: %w", specDir, err)
+		return nil, fmt.Errorf("creating spec directory %s: %w", specDir, err)
 	}
 
+	imported := 0
 	for path, pathItem := range spec.Paths.Map() {
 		// Generate request for each operation
 		operations := map[string]*openapi3.Operation{
-			"GET":    pathItem.Get,
-			"POST":   pathItem.Post,
-			"PUT":    pathItem.Put,
-			"DELETE": pathItem.Delete,
-			"PATCH":  pathItem.Patch,
+			"GET":     pathItem.Get,
+			"HEAD":    pathItem.Head,
+			"POST":    pathItem.Post,
+			"PUT":     pathItem.Put,
+			"DELETE":  pathItem.Delete,
+			"OPTIONS": pathItem.Options,
+			"PATCH":   pathItem.Patch,
 		}
 
 		for method, operation := range operations {
@@ -614,13 +694,13 @@ func (cm *ConfigManager) GenerateRequestsFromOpenAPI(spec *openapi3.T) error {
 			if operation.OperationID != "" {
 				requestName = operation.OperationID
 			}
-			requestName = strings.ToLower(requestName)
+			requestName = sanitizeRequestPathSegment(requestName)
 
 			// Create a separate folder for this request
 			requestDir := filepath.Join(specDir, requestName)
 			err = os.MkdirAll(requestDir, 0755)
 			if err != nil {
-				return fmt.Errorf("creating request directory %s: %w", requestDir, err)
+				return nil, fmt.Errorf("creating request directory %s: %w", requestDir, err)
 			}
 
 			// Create simplified request info structure
@@ -630,12 +710,14 @@ func (cm *ConfigManager) GenerateRequestsFromOpenAPI(spec *openapi3.T) error {
 				Body    string            `json:"body"`
 				Method  string            `json:"method"`
 				Name    string            `json:"name"`
+				Params  map[string]string `json:"params,omitempty"`
 			}{
 				URL:     path,
 				Headers: make(map[string]string),
 				Body:    "",
 				Method:  method,
 				Name:    requestName,
+				Params:  make(map[string]string),
 			}
 
 			// Add default headers based on operation
@@ -648,19 +730,58 @@ func (cm *ConfigManager) GenerateRequestsFromOpenAPI(spec *openapi3.T) error {
 				}
 			}
 
+			for _, parameterRef := range operation.Parameters {
+				if parameterRef == nil || parameterRef.Value == nil {
+					continue
+				}
+				parameter := parameterRef.Value
+				if parameter.In != "query" || parameter.Name == "" {
+					continue
+				}
+				requestInfo.Params[parameter.Name] = defaultParameterValue(parameter)
+			}
+
+			if len(requestInfo.Params) == 0 {
+				requestInfo.Params = nil
+			}
+
 			// Save request info to JSON file in the request folder
 			requestFile := filepath.Join(requestDir, "request.json")
 			data, err := json.MarshalIndent(requestInfo, "", "  ")
 			if err != nil {
-				return fmt.Errorf("marshaling request info: %w", err)
+				return nil, fmt.Errorf("marshaling request info: %w", err)
 			}
 
 			err = os.WriteFile(requestFile, data, 0644)
 			if err != nil {
-				return fmt.Errorf("writing request file %s: %w", requestFile, err)
+				return nil, fmt.Errorf("writing request file %s: %w", requestFile, err)
 			}
+			imported++
 		}
 	}
 
-	return nil
+	return &OpenAPIImportResult{Collection: specTitle, Imported: imported}, nil
+}
+
+func defaultParameterValue(parameter *openapi3.Parameter) string {
+	if parameter.Example != nil {
+		return fmt.Sprint(parameter.Example)
+	}
+	if parameter.Schema != nil && parameter.Schema.Value != nil && parameter.Schema.Value.Default != nil {
+		return fmt.Sprint(parameter.Schema.Value.Default)
+	}
+	return ""
+}
+
+var requestPathSegmentPattern = regexp.MustCompile(`[^a-z0-9._{}-]+`)
+
+func sanitizeRequestPathSegment(value string) string {
+	sanitized := strings.ToLower(strings.TrimSpace(value))
+	sanitized = strings.ReplaceAll(sanitized, "/", "-")
+	sanitized = requestPathSegmentPattern.ReplaceAllString(sanitized, "-")
+	sanitized = strings.Trim(sanitized, "-")
+	if sanitized == "" {
+		return "api"
+	}
+	return sanitized
 }

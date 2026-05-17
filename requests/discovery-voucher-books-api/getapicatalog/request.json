@@ -1,0 +1,7 @@
+{
+  "url": "/api/catalog",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "getapicatalog"
+}

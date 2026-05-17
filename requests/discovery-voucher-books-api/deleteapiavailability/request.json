@@ -1,0 +1,7 @@
+{
+  "url": "/api/availability",
+  "headers": {},
+  "body": "",
+  "method": "DELETE",
+  "name": "deleteapiavailability"
+}

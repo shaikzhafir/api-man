@@ -1,0 +1,11 @@
+{
+  "url": "/feed",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "getfeed",
+  "params": {
+    "cursor": "",
+    "limit": ""
+  }
+}

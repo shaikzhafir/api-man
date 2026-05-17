@@ -1,0 +1,11 @@
+{
+  "url": "/users/{id}/posts",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "getuserposts",
+  "params": {
+    "cursor": "",
+    "limit": ""
+  }
+}

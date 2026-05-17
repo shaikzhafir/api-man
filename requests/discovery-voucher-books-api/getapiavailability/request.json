@@ -1,0 +1,10 @@
+{
+  "url": "/api/availability",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "getapiavailability",
+  "params": {
+    "retailer": ""
+  }
+}

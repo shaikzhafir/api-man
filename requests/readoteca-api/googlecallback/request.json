@@ -1,0 +1,12 @@
+{
+  "url": "/google/callback",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "googlecallback",
+  "params": {
+    "code": "",
+    "error": "",
+    "state": ""
+  }
+}

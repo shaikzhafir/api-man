@@ -1,0 +1,11 @@
+{
+  "url": "/api/suggestions",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "getapisuggestions",
+  "params": {
+    "status": "",
+    "retailer": ""
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "url": "/me/profile",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\n  \"example\": \"data\"\n}",
+  "method": "PATCH",
+  "name": "patchmeprofile"
+}

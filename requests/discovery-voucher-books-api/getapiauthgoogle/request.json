@@ -1,0 +1,7 @@
+{
+  "url": "/api/auth/google",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "getapiauthgoogle"
+}

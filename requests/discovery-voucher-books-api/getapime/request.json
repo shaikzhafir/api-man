@@ -1,0 +1,7 @@
+{
+  "url": "/api/me",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "getapime"
+}

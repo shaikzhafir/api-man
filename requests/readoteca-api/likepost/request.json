@@ -1,0 +1,9 @@
+{
+  "url": "/posts/{id}/like",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "",
+  "method": "POST",
+  "name": "likepost"
+}

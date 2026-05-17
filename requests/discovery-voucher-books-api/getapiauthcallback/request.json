@@ -1,0 +1,7 @@
+{
+  "url": "/api/auth/callback",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "getapiauthcallback"
+}
