@@ -1,0 +1,1259 @@
+openapi: 3.0.3
+info:
+  title: Readoteca API
+  version: 0.0.1
+  description: OAuth-only book tracking API.
+servers:
+  - url: http://localhost:8080
+    description: Local backend
+
+components:
+  securitySchemes:
+    SessionAuth:
+      type: apiKey
+      in: cookie
+      name: session_id
+    BearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        avatarUrl:
+          type: string
+          nullable: true
+        publicLibraryStatsEnabled:
+          type: boolean
+      required:
+        - id
+        - email
+        - displayName
+        - avatarUrl
+        - publicLibraryStatsEnabled
+
+    ApiTokenStatus:
+      type: object
+      properties:
+        exists:
+          type: boolean
+        preview:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - exists
+        - preview
+        - createdAt
+        - updatedAt
+
+    CreateApiTokenResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        preview:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - token
+        - preview
+        - createdAt
+        - updatedAt
+
+    SocialUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        displayName:
+          type: string
+        avatarUrl:
+          type: string
+          nullable: true
+      required:
+        - id
+        - displayName
+        - avatarUrl
+
+    BookStatus:
+      type: string
+      enum:
+        - want_to_read
+        - reading
+        - finished
+        - abandoned
+
+    Book:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        source:
+          type: string
+        sourceId:
+          type: string
+        isbn10:
+          type: string
+          nullable: true
+        isbn13:
+          type: string
+          nullable: true
+        title:
+          type: string
+        authors:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+          nullable: true
+        coverUrl:
+          type: string
+          nullable: true
+        publishedDate:
+          type: string
+          nullable: true
+      required:
+        - id
+        - source
+        - sourceId
+        - isbn10
+        - isbn13
+        - title
+        - authors
+        - description
+        - coverUrl
+        - publishedDate
+
+    BookSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        source:
+          type: string
+        sourceId:
+          type: string
+        title:
+          type: string
+        authors:
+          type: array
+          items:
+            type: string
+        coverUrl:
+          type: string
+          nullable: true
+        publishedDate:
+          type: string
+          nullable: true
+      required:
+        - id
+        - source
+        - sourceId
+        - title
+        - authors
+        - coverUrl
+        - publishedDate
+
+    CatalogBook:
+      type: object
+      properties:
+        source:
+          type: string
+        sourceId:
+          type: string
+        isbn10:
+          type: string
+          nullable: true
+        isbn13:
+          type: string
+          nullable: true
+        title:
+          type: string
+        authors:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+          nullable: true
+        coverUrl:
+          type: string
+          nullable: true
+        publishedDate:
+          type: string
+          nullable: true
+      required:
+        - source
+        - sourceId
+        - isbn10
+        - isbn13
+        - title
+        - authors
+        - description
+        - coverUrl
+        - publishedDate
+
+    LibraryItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        status:
+          $ref: "#/components/schemas/BookStatus"
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        review:
+          type: string
+          nullable: true
+        reviewPublished:
+          type: boolean
+        publishedReviewPostId:
+          type: integer
+          format: int64
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        abandonedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        book:
+          $ref: "#/components/schemas/Book"
+      required:
+        - id
+        - status
+        - progress
+        - rating
+        - notes
+        - review
+        - reviewPublished
+        - publishedReviewPostId
+        - startedAt
+        - finishedAt
+        - abandonedAt
+        - createdAt
+        - updatedAt
+        - book
+
+    AddLibraryItemRequest:
+      type: object
+      properties:
+        source:
+          type: string
+          enum:
+            - google_books
+        sourceId:
+          type: string
+      required:
+        - source
+        - sourceId
+
+    PatchLibraryItemRequest:
+      type: object
+      properties:
+        status:
+          $ref: "#/components/schemas/BookStatus"
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        review:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    SocialPostKind:
+      type: string
+      enum:
+        - manual
+        - review
+
+    FeedPost:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        author:
+          $ref: "#/components/schemas/SocialUser"
+        kind:
+          $ref: "#/components/schemas/SocialPostKind"
+        body:
+          type: string
+        book:
+          allOf:
+            - $ref: "#/components/schemas/BookSummary"
+          nullable: true
+        sourceLibraryItemId:
+          type: integer
+          format: int64
+          nullable: true
+        likeCount:
+          type: integer
+        likedByMe:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - author
+        - kind
+        - body
+        - book
+        - sourceLibraryItemId
+        - likeCount
+        - likedByMe
+        - createdAt
+        - updatedAt
+
+    FeedPage:
+      type: object
+      properties:
+        posts:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeedPost"
+        nextCursor:
+          type: integer
+          format: int64
+          nullable: true
+      required:
+        - posts
+        - nextCursor
+
+    PostDetail:
+      type: object
+      properties:
+        post:
+          $ref: "#/components/schemas/FeedPost"
+        book:
+          allOf:
+            - $ref: "#/components/schemas/Book"
+          nullable: true
+        viewerLibraryItemId:
+          type: integer
+          format: int64
+          nullable: true
+      required:
+        - post
+        - book
+        - viewerLibraryItemId
+
+    CreatePostRequest:
+      type: object
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 280
+        libraryItemId:
+          type: integer
+          format: int64
+          nullable: true
+      required:
+        - body
+      additionalProperties: false
+
+    PatchProfileRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        publicLibraryStatsEnabled:
+          type: boolean
+      additionalProperties: false
+
+    UserProfile:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/SocialUser"
+        isViewer:
+          type: boolean
+        publicLibraryStatsEnabled:
+          type: boolean
+        stats:
+          type: object
+          nullable: true
+          properties:
+            total:
+              type: integer
+            wantToRead:
+              type: integer
+            reading:
+              type: integer
+            finished:
+              type: integer
+            abandoned:
+              type: integer
+          required:
+            - total
+            - wantToRead
+            - reading
+            - finished
+            - abandoned
+      required:
+        - user
+        - isViewer
+        - publicLibraryStatsEnabled
+        - stats
+
+    PublishReviewRequest:
+      type: object
+      properties:
+        review:
+          type: string
+          minLength: 1
+          maxLength: 2000
+      required:
+        - review
+      additionalProperties: false
+
+    SearchBooksParams:
+      type: object
+      properties:
+        q:
+          type: string
+          minLength: 1
+      required:
+        - q
+
+paths:
+  /api/google/login:
+    get:
+      operationId: googleLogin
+      tags:
+        - Auth
+      summary: Start Google OAuth login
+      parameters:
+        - name: next
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirects to Google OAuth.
+          headers:
+            Location:
+              schema:
+                type: string
+            Set-Cookie:
+              schema:
+                type: string
+
+  /api/google/callback:
+    get:
+      operationId: googleCallback
+      tags:
+        - Auth
+      summary: Complete Google OAuth login
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Sets session cookie and redirects to the frontend callback.
+          headers:
+            Location:
+              schema:
+                type: string
+            Set-Cookie:
+              schema:
+                type: string
+        "400":
+          description: Invalid OAuth callback.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/me:
+    get:
+      operationId: getMe
+      tags:
+        - Auth
+      summary: Get the current authenticated user
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: Current user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/logout:
+    post:
+      operationId: logout
+      tags:
+        - Auth
+      summary: Delete the current session
+      security:
+        - SessionAuth: []
+      responses:
+        "204":
+          description: Session deleted.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+
+  /api/me/profile:
+    patch:
+      operationId: patchMeProfile
+      tags:
+        - Profile
+      summary: Update current-user profile settings
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchProfileRequest"
+      responses:
+        "200":
+          description: Updated current user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid input.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/me/api-token:
+    get:
+      operationId: getMeApiToken
+      tags:
+        - Auth
+      summary: Get current-user API token status
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: API token status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiTokenStatus"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createMeApiToken
+      tags:
+        - Auth
+      summary: Generate or rotate current-user API token
+      security:
+        - SessionAuth: []
+      responses:
+        "201":
+          description: Generated API token. The token value is only returned in this response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateApiTokenResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteMeApiToken
+      tags:
+        - Auth
+      summary: Revoke current-user API token
+      security:
+        - SessionAuth: []
+      responses:
+        "204":
+          description: API token revoked.
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/feed:
+    get:
+      operationId: getFeed
+      tags:
+        - Social
+      summary: Get the authenticated social feed
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+      responses:
+        "200":
+          description: Feed page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedPage"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/posts:
+    post:
+      operationId: createPost
+      tags:
+        - Social
+      summary: Create a manual social post
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePostRequest"
+      responses:
+        "201":
+          description: Created post.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedPost"
+        "400":
+          description: Invalid input.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/posts/{id}:
+    get:
+      operationId: getPost
+      tags:
+        - Social
+      summary: Get a post detail
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Post detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostDetail"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deletePost
+      tags:
+        - Social
+      summary: Soft-delete an owned post
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/library/{id}/review/publish:
+    post:
+      operationId: publishReview
+      tags:
+        - Library
+        - Social
+      summary: Publish the current review as a snapshot post
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishReviewRequest"
+      responses:
+        "201":
+          description: Created review post.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedPost"
+        "400":
+          description: Invalid input.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: unpublishReview
+      tags:
+        - Library
+        - Social
+      summary: Unpublish the linked review post
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Unpublished.
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/users/{id}:
+    get:
+      operationId: getUserProfile
+      tags:
+        - Profile
+      summary: Get a minimal user profile
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: User profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/users/{id}/posts:
+    get:
+      operationId: getUserPosts
+      tags:
+        - Profile
+        - Social
+      summary: Get a user's public posts
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+      responses:
+        "200":
+          description: Profile post page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedPage"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/posts/{id}/like:
+    post:
+      operationId: likePost
+      tags:
+        - Social
+      summary: Like a post
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Liked.
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: unlikePost
+      tags:
+        - Social
+      summary: Unlike a post
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Unliked.
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/books/search:
+    get:
+      operationId: searchBooks
+      tags:
+        - Books
+      summary: Search the external book catalog
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Matching catalog books.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CatalogBook"
+        "400":
+          description: Invalid query.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/reading-list:
+    get:
+      operationId: getReadingList
+      tags:
+        - Library
+      summary: List the API token owner's reading list
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Reading list items.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LibraryItem"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/library:
+    get:
+      operationId: listLibrary
+      tags:
+        - Library
+      summary: List the current user's library
+      security:
+        - SessionAuth: []
+      responses:
+        "200":
+          description: Library items.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LibraryItem"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: addLibraryItem
+      tags:
+        - Library
+      summary: Add a catalog book to the current user's library
+      security:
+        - SessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddLibraryItemRequest"
+      responses:
+        "200":
+          description: Existing library item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryItem"
+        "201":
+          description: Created library item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryItem"
+        "400":
+          description: Invalid input.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/library/{id}:
+    get:
+      operationId: getLibraryItem
+      tags:
+        - Library
+      summary: Get one current-user library item
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Library item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryItem"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: patchLibraryItem
+      tags:
+        - Library
+      summary: Update one current-user library item
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchLibraryItemRequest"
+      responses:
+        "200":
+          description: Updated library item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryItem"
+        "400":
+          description: Invalid input.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteLibraryItem
+      tags:
+        - Library
+      summary: Remove a book from the current user's library
+      security:
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: Removed from library.
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"

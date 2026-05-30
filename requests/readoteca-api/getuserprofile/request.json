@@ -1,5 +1,5 @@
 {
-  "url": "/users/{id}",
+  "url": "/api/users/{id}",
   "headers": {},
   "body": "",
   "method": "GET",

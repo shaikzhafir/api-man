@@ -1,6 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']
+const BODY_NAME_PATTERN = /^[a-z0-9._-]+$/
+const HEADER_PRESETS = [
+  { label: 'Bearer auth', key: 'Authorization', value: 'Bearer ' },
+  { label: 'JSON content', key: 'Content-Type', value: 'application/json' },
+  { label: 'Accept JSON', key: 'Accept', value: 'application/json' },
+  { label: 'API key', key: 'X-API-Key', value: '' },
+]
 
 function RequestBuilder({ request, onExecute, isLoading, curlRequest, executedRequest }) {
   const [method, setMethod] = useState('GET')
@@ -10,6 +17,12 @@ function RequestBuilder({ request, onExecute, isLoading, curlRequest, executedRe
   const [queryParams, setQueryParams] = useState([{ key: '', value: '' }])
   const [headers, setHeaders] = useState([{ key: '', value: '' }])
   const [body, setBody] = useState('')
+  const [bodyTemplates, setBodyTemplates] = useState([{ name: 'default', content: '' }])
+  const [activeBodyName, setActiveBodyName] = useState('default')
+  const [bodyDirty, setBodyDirty] = useState(false)
+  const [newBodyName, setNewBodyName] = useState(null) // null = not creating; string = current input
+  const [bodyError, setBodyError] = useState('')
+  const newBodyInputRef = useRef(null)
   const [activeTab, setActiveTab] = useState('path')
   const [showCurl, setShowCurl] = useState(() => {
     try {
@@ -48,8 +61,44 @@ function RequestBuilder({ request, onExecute, isLoading, curlRequest, executedRe
         bodyStr = JSON.stringify(bodyStr, null, 2)
       }
       setBody(bodyStr)
+      setBodyTemplates([{ name: 'default', content: bodyStr }])
+      setActiveBodyName('default')
+      setBodyDirty(false)
+      setNewBodyName(null)
+      setBodyError('')
+
+      if (request.path) {
+        loadBodyTemplates(request.path)
+      }
     }
   }, [request])
+
+  const loadBodyTemplates = async (requestPath) => {
+    try {
+      const res = await fetch(`/api/request-bodies/${requestPath}`)
+      if (!res.ok) return
+      const data = await res.json()
+      applyBodyList(data)
+    } catch (err) {
+      console.error('Error loading body templates:', err)
+    }
+  }
+
+  const applyBodyList = (data, preferActive) => {
+    const list = data?.bodies?.length ? data.bodies : [{ name: 'default', content: '' }]
+    const active = preferActive ?? data?.active ?? 'default'
+    const found = list.find(b => b.name === active) || list[0]
+    setBodyTemplates(list)
+    setActiveBodyName(found.name)
+    setBody(found.content || '')
+    setBodyDirty(false)
+  }
+
+  useEffect(() => {
+    if (newBodyName !== null) {
+      newBodyInputRef.current?.focus()
+    }
+  }, [newBodyName])
 
   useEffect(() => {
     setCopyState('idle')
@@ -65,6 +114,33 @@ function RequestBuilder({ request, onExecute, isLoading, curlRequest, executedRe
 
   const addHeader = () => {
     setHeaders([...headers, { key: '', value: '' }])
+  }
+
+  const addHeaderPreset = (preset) => {
+    const existingIndex = headers.findIndex(
+      header => header.key.trim().toLowerCase() === preset.key.toLowerCase()
+    )
+
+    if (existingIndex >= 0) {
+      const newHeaders = [...headers]
+      newHeaders[existingIndex] = {
+        ...newHeaders[existingIndex],
+        key: preset.key,
+        value: preset.value,
+      }
+      setHeaders(newHeaders)
+      return
+    }
+
+    const emptyIndex = headers.findIndex(header => !header.key && !header.value)
+    if (emptyIndex >= 0) {
+      const newHeaders = [...headers]
+      newHeaders[emptyIndex] = { key: preset.key, value: preset.value }
+      setHeaders(newHeaders)
+      return
+    }
+
+    setHeaders([...headers, { key: preset.key, value: preset.value }])
   }
 
   const removeHeader = (index) => {
@@ -161,6 +237,162 @@ function RequestBuilder({ request, onExecute, isLoading, curlRequest, executedRe
     }
   }
 
+  const switchActiveBody = async (name) => {
+    if (name === activeBodyName) return
+    if (bodyDirty) {
+      await persistBodyContent(activeBodyName, body)
+    }
+    const target = bodyTemplates.find(b => b.name === name)
+    setActiveBodyName(name)
+    setBody(target?.content || '')
+    setBodyDirty(false)
+    setBodyError('')
+
+    if (!request?.path) return
+    try {
+      const res = await fetch(`/api/request-bodies/${request.path}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: name }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        applyBodyList(data, name)
+      }
+    } catch (err) {
+      console.error('Error switching active body:', err)
+    }
+  }
+
+  const persistBodyContent = async (name, content) => {
+    if (!request?.path) return
+    try {
+      const res = await fetch(
+        `/api/request-bodies/${request.path}?body=${encodeURIComponent(name)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'text/plain' },
+          body: content,
+        }
+      )
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || `Save failed (${res.status})`)
+      }
+      setBodyTemplates(prev =>
+        prev.map(b => (b.name === name ? { ...b, content } : b))
+      )
+      setBodyDirty(false)
+    } catch (err) {
+      setBodyError(err.message)
+    }
+  }
+
+  const handleBodyBlur = () => {
+    if (bodyDirty) {
+      persistBodyContent(activeBodyName, body)
+    }
+  }
+
+  const startNewBody = () => {
+    setNewBodyName('')
+    setBodyError('')
+  }
+
+  const cancelNewBody = () => {
+    setNewBodyName(null)
+    setBodyError('')
+  }
+
+  const submitNewBody = async () => {
+    const trimmed = (newBodyName || '').trim()
+    if (!trimmed) {
+      setBodyError('name required')
+      return
+    }
+    if (trimmed === 'default') {
+      setBodyError('"default" is reserved')
+      return
+    }
+    if (!BODY_NAME_PATTERN.test(trimmed)) {
+      setBodyError('name must be lowercase letters, numbers, dot, dash, or underscore')
+      return
+    }
+    if (bodyTemplates.some(b => b.name === trimmed)) {
+      setBodyError(`"${trimmed}" already exists`)
+      return
+    }
+    if (!request?.path) return
+
+    if (bodyDirty) {
+      await persistBodyContent(activeBodyName, body)
+    }
+
+    try {
+      const res = await fetch(`/api/request-bodies/${request.path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed, source: activeBodyName }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || `Create failed (${res.status})`)
+      }
+      const data = await res.json()
+      // Set active server-side, then apply.
+      await fetch(`/api/request-bodies/${request.path}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: trimmed }),
+      })
+      applyBodyList(data, trimmed)
+      setNewBodyName(null)
+    } catch (err) {
+      setBodyError(err.message)
+    }
+  }
+
+  const formatBodyAsJson = () => {
+    if (!body.trim()) {
+      setBody('{\n  \n}')
+      setBodyDirty(true)
+      setBodyError('')
+      return
+    }
+    try {
+      const parsed = JSON.parse(body)
+      const formatted = JSON.stringify(parsed, null, 2)
+      if (formatted !== body) {
+        setBody(formatted)
+        setBodyDirty(true)
+      }
+      setBodyError('')
+    } catch (err) {
+      setBodyError(`Invalid JSON: ${err.message}`)
+    }
+  }
+
+  const deleteActiveBody = async () => {
+    if (activeBodyName === 'default') return
+    if (!request?.path) return
+    if (!window.confirm(`Delete body "${activeBodyName}"?`)) return
+
+    try {
+      const res = await fetch(
+        `/api/request-bodies/${request.path}?body=${encodeURIComponent(activeBodyName)}`,
+        { method: 'DELETE' }
+      )
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || `Delete failed (${res.status})`)
+      }
+      const data = await res.json()
+      applyBodyList(data, 'default')
+    } catch (err) {
+      setBodyError(err.message)
+    }
+  }
+
   if (!request) {
     return (
       <div className="request-builder empty">
@@ -205,12 +437,22 @@ function RequestBuilder({ request, onExecute, isLoading, curlRequest, executedRe
           disabled={isLoading}
         />
         
-        <button 
-          onClick={handleExecute} 
+        <button
+          onClick={handleExecute}
           disabled={isLoading}
           className="send-button"
         >
-          {isLoading ? 'Sending...' : 'Send'}
+          {isLoading ? 'Sending…' : 'Send'}
+        </button>
+
+        <button
+          type="button"
+          className={`curl-chip ${showCurl ? 'active' : ''}`}
+          onClick={() => setShowCurl(prev => !prev)}
+          aria-pressed={showCurl}
+          title="Show curl preview after each send"
+        >
+          curl
         </button>
       </div>
 
@@ -235,22 +477,13 @@ function RequestBuilder({ request, onExecute, isLoading, curlRequest, executedRe
         >
           Headers{activeHeaderCount > 0 ? ` (${activeHeaderCount})` : ''}
         </button>
-        
+
         <button
           className={activeTab === 'body' ? 'tab-button active' : 'tab-button'}
           onClick={() => setActiveTab('body')}
         >
           Body{body ? ' *' : ''}
         </button>
-
-        <label className={`curl-toggle ${showCurl ? 'active' : ''}`}>
-          <input
-            type="checkbox"
-            checked={showCurl}
-            onChange={(e) => setShowCurl(e.target.checked)}
-          />
-          Show curl after send
-        </label>
       </div>
 
       <div className="tab-content">
@@ -306,13 +539,28 @@ function RequestBuilder({ request, onExecute, isLoading, curlRequest, executedRe
               </div>
             ))}
             <button onClick={addQueryParam} className="add-button" disabled={isLoading}>
-              + Add Param
+              + Add param
             </button>
           </div>
         )}
 
         {activeTab === 'headers' && (
           <div className="headers-section">
+            <div className="header-presets" aria-label="Common header presets">
+              {HEADER_PRESETS.map((preset) => (
+                <button
+                  key={preset.key}
+                  type="button"
+                  className="header-preset-button"
+                  onClick={() => addHeaderPreset(preset)}
+                  disabled={isLoading}
+                  title={`Add ${preset.key}`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
             {headers.map((header, index) => (
               <div key={index} className="header-row">
                 <input
@@ -341,21 +589,124 @@ function RequestBuilder({ request, onExecute, isLoading, curlRequest, executedRe
               </div>
             ))}
             <button onClick={addHeader} className="add-button" disabled={isLoading}>
-              + Add Header
+              + Add header
             </button>
           </div>
         )}
 
         {activeTab === 'body' && (
           <div className="body-section">
+            <div className="body-tabs">
+              {bodyTemplates.map((b) => (
+                <button
+                  key={b.name}
+                  type="button"
+                  className={`body-tab ${b.name === activeBodyName ? 'active' : ''}`}
+                  onClick={() => switchActiveBody(b.name)}
+                  title={request?.path ? `requests/${request.path}/${b.name === 'default' ? 'request.json (inline)' : b.name + '.json'}` : b.name}
+                  disabled={isLoading}
+                >
+                  {b.name}
+                </button>
+              ))}
+
+              {newBodyName === null ? (
+                <button
+                  type="button"
+                  className="body-tab body-tab-add"
+                  onClick={startNewBody}
+                  disabled={isLoading}
+                  title="Save current body as a new named template"
+                >
+                  +
+                </button>
+              ) : (
+                <span className="body-tab body-tab-form">
+                  <input
+                    ref={newBodyInputRef}
+                    type="text"
+                    value={newBodyName}
+                    onChange={(e) => {
+                      setNewBodyName(e.target.value)
+                      if (bodyError) setBodyError('')
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        submitNewBody()
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault()
+                        cancelNewBody()
+                      }
+                    }}
+                    placeholder="new-body-name"
+                    className="body-tab-input"
+                    spellCheck={false}
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    className="body-tab-confirm"
+                    onClick={submitNewBody}
+                  >
+                    ↵
+                  </button>
+                  <button
+                    type="button"
+                    className="body-tab-cancel"
+                    onClick={cancelNewBody}
+                  >
+                    ×
+                  </button>
+                </span>
+              )}
+
+              {activeBodyName !== 'default' && newBodyName === null && (
+                <button
+                  type="button"
+                  className="body-tab-delete"
+                  onClick={deleteActiveBody}
+                  disabled={isLoading}
+                  title={`Delete "${activeBodyName}"`}
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+
+            {bodyError && <div className="body-error">{bodyError}</div>}
+
             <textarea
               value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="Request body (JSON, XML, etc.)"
+              onChange={(e) => {
+                setBody(e.target.value)
+                setBodyDirty(true)
+              }}
+              onBlur={handleBodyBlur}
+              placeholder='Request body as JSON, e.g. { "key": "value" }'
               className="body-textarea"
-              rows="8"
+              rows="16"
               disabled={isLoading}
             />
+
+            <div className="body-actions">
+              <button
+                type="button"
+                className="format-json-button"
+                onClick={formatBodyAsJson}
+                disabled={isLoading}
+                title="Pretty-print body as JSON"
+              >
+                Format JSON
+              </button>
+              <span className={`body-meta ${bodyDirty ? 'dirty' : ''}`}>
+                {bodyDirty
+                  ? 'unsaved'
+                  : request?.path
+                    ? `requests/${request.path}/${activeBodyName === 'default' ? 'request.json' : activeBodyName + '.json'}`
+                    : ''}
+              </span>
+            </div>
           </div>
         )}
       </div>
@@ -381,7 +732,7 @@ function RequestBuilder({ request, onExecute, isLoading, curlRequest, executedRe
             </button>
           </div>
           <pre className={`curl-request-content ${curlRequest ? '' : 'empty'}`}>
-            {curlRequest || (isLoading ? 'Sending request...' : 'Send a request to generate a copyable curl command.')}
+            {curlRequest || (isLoading ? 'Sending request…' : 'Send a request to generate a copyable curl command.')}
           </pre>
         </div>
       )}

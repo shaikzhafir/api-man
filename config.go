@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -45,6 +47,7 @@ type ConfigManager struct {
 type OpenAPIImportResult struct {
 	Collection string `json:"collection"`
 	Imported   int    `json:"imported"`
+	Bodies     int    `json:"bodies,omitempty"`
 	Pruned     int    `json:"pruned,omitempty"`
 	SpecPath   string `json:"specPath,omitempty"`
 }
@@ -56,6 +59,9 @@ type OpenAPIPreview struct {
 	Exists              bool   `json:"exists"`
 	OwnedBySpec         bool   `json:"ownedBySpec"`
 	Operations          int    `json:"operations"`
+	Requests            int    `json:"requests,omitempty"`
+	Bodies              int    `json:"bodies,omitempty"`
+	Type                string `json:"type,omitempty"`
 }
 
 // ImportOptions controls OpenAPI import behavior.
@@ -95,6 +101,7 @@ func NewConfigManager() (*ConfigManager, error) {
 	}
 
 	cm := &ConfigManager{
+		configDir:       cwd,
 		requestsDir:     requestsDir,
 		environmentsDir: environmentsDir,
 	}
@@ -335,6 +342,214 @@ func (cm *ConfigManager) ListEnvironments() ([]string, error) {
 	}
 
 	return environments, nil
+}
+
+var environmentNamePattern = regexp.MustCompile(`^[a-z0-9._-]+$`)
+
+// ValidateEnvironmentName enforces the on-disk naming rule for environment files.
+// Names map directly to environments/<name>.json so they must be filesystem-safe.
+func ValidateEnvironmentName(name string) error {
+	if name == "" {
+		return fmt.Errorf("name required")
+	}
+	if len(name) > 64 {
+		return fmt.Errorf("name must be 64 characters or fewer")
+	}
+	if !environmentNamePattern.MatchString(name) {
+		return fmt.Errorf("name must be lowercase letters, numbers, dot, dash, or underscore")
+	}
+	return nil
+}
+
+// EnvironmentExistsError signals an attempt to create an env that already exists on disk.
+type EnvironmentExistsError struct {
+	Name string
+}
+
+func (e *EnvironmentExistsError) Error() string {
+	return fmt.Sprintf("environment %q already exists", e.Name)
+}
+
+// CreateEnvironment writes a new environment file. When source is non-empty,
+// values are cloned from that existing environment; otherwise a minimal default
+// with Content-Type: application/json is seeded.
+func (cm *ConfigManager) CreateEnvironment(name, source string) (*Environment, error) {
+	if err := ValidateEnvironmentName(name); err != nil {
+		return nil, err
+	}
+
+	filePath := filepath.Join(cm.environmentsDir, name+".json")
+	if _, err := os.Stat(filePath); err == nil {
+		return nil, &EnvironmentExistsError{Name: name}
+	}
+
+	var env Environment
+	if source != "" {
+		src, err := cm.LoadEnvironment(source)
+		if err != nil {
+			return nil, fmt.Errorf("loading source environment %q: %w", source, err)
+		}
+		env = cloneEnvironment(src)
+	} else {
+		env = Environment{
+			BaseURL:   "",
+			Headers:   map[string]string{"Content-Type": "application/json"},
+			Cookies:   map[string]string{},
+			Auth:      map[string]string{},
+			Variables: map[string]string{},
+		}
+	}
+
+	if err := cm.SaveEnvironment(name, env); err != nil {
+		return nil, err
+	}
+	return &env, nil
+}
+
+func cloneEnvironment(src *Environment) Environment {
+	dst := Environment{
+		BaseURL:   src.BaseURL,
+		Headers:   make(map[string]string, len(src.Headers)),
+		Cookies:   make(map[string]string, len(src.Cookies)),
+		Auth:      make(map[string]string, len(src.Auth)),
+		Variables: make(map[string]string, len(src.Variables)),
+	}
+	maps.Copy(dst.Headers, src.Headers)
+	maps.Copy(dst.Cookies, src.Cookies)
+	maps.Copy(dst.Auth, src.Auth)
+	maps.Copy(dst.Variables, src.Variables)
+	return dst
+}
+
+// Body templates are named *.json files that live next to a request's
+// request.json file (path: requests/<col>/<req>/<name>.json). The reserved name
+// "default" refers to the inline RequestConfig.Body field, not a file. The
+// regex below matches the env naming rule for consistency.
+var bodyNamePattern = regexp.MustCompile(`^[a-z0-9._-]+$`)
+
+const defaultBodyName = "default"
+
+// ValidateBodyName enforces the on-disk naming rule for body templates.
+// "default" is reserved for the inline body field on RequestConfig.
+func ValidateBodyName(name string) error {
+	if name == "" {
+		return fmt.Errorf("name required")
+	}
+	if name == defaultBodyName {
+		return fmt.Errorf("name %q is reserved", defaultBodyName)
+	}
+	if len(name) > 64 {
+		return fmt.Errorf("name must be 64 characters or fewer")
+	}
+	if !bodyNamePattern.MatchString(name) {
+		return fmt.Errorf("name must be lowercase letters, numbers, dot, dash, or underscore")
+	}
+	return nil
+}
+
+// BodyExistsError signals an attempt to create a body template that already exists.
+type BodyExistsError struct {
+	Name string
+}
+
+func (e *BodyExistsError) Error() string {
+	return fmt.Sprintf("body %q already exists", e.Name)
+}
+
+// LoadBodyContent reads the raw content of a named body template. The reserved
+// name "default" returns the inline RequestConfig.Body value.
+func (cm *ConfigManager) LoadBodyContent(requestPath, name string) (string, error) {
+	if name == defaultBodyName || name == "" {
+		config, err := cm.LoadRequest(requestPath)
+		if err != nil {
+			return "", err
+		}
+		return config.Body, nil
+	}
+	if err := ValidateBodyName(name); err != nil {
+		return "", err
+	}
+	bodyFilePath := filepath.Join(cm.requestsDir, requestPath, name+".json")
+	data, err := os.ReadFile(bodyFilePath)
+	if err != nil {
+		return "", fmt.Errorf("reading body file: %w", err)
+	}
+	return string(data), nil
+}
+
+// SaveBodyContent writes the content for a named body template. Saving the
+// reserved name "default" updates the inline RequestConfig.Body field.
+func (cm *ConfigManager) SaveBodyContent(requestPath, name, content string) error {
+	if name == defaultBodyName || name == "" {
+		config, err := cm.LoadRequest(requestPath)
+		if err != nil {
+			return err
+		}
+		config.Body = content
+		return cm.SaveRequest(requestPath, *config)
+	}
+	if err := ValidateBodyName(name); err != nil {
+		return err
+	}
+	requestDir := filepath.Join(cm.requestsDir, requestPath)
+	if err := os.MkdirAll(requestDir, 0755); err != nil {
+		return fmt.Errorf("creating request directory: %w", err)
+	}
+	bodyFilePath := filepath.Join(requestDir, name+".json")
+	if err := os.WriteFile(bodyFilePath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("writing body file: %w", err)
+	}
+	return nil
+}
+
+// CreateBody creates a new body template file. When source is non-empty its
+// content is cloned; "default" or "" clones the inline body. Returns
+// BodyExistsError if the named template already exists.
+func (cm *ConfigManager) CreateBody(requestPath, name, source string) (string, error) {
+	if err := ValidateBodyName(name); err != nil {
+		return "", err
+	}
+	requestDir := filepath.Join(cm.requestsDir, requestPath)
+	bodyFilePath := filepath.Join(requestDir, name+".json")
+	if _, err := os.Stat(bodyFilePath); err == nil {
+		return "", &BodyExistsError{Name: name}
+	}
+
+	var content string
+	if source != "" {
+		seed, err := cm.LoadBodyContent(requestPath, source)
+		if err != nil {
+			return "", fmt.Errorf("loading source body %q: %w", source, err)
+		}
+		content = seed
+	}
+
+	if err := cm.SaveBodyContent(requestPath, name, content); err != nil {
+		return "", err
+	}
+	return content, nil
+}
+
+// SetActiveBodyByName sets which body to use for a request. The reserved name
+// "default" or an empty string clears ActiveBody so the inline body is used.
+func (cm *ConfigManager) SetActiveBodyByName(requestPath, name string) error {
+	config, err := cm.LoadRequest(requestPath)
+	if err != nil {
+		return fmt.Errorf("loading request: %w", err)
+	}
+	if name == "" || name == defaultBodyName {
+		config.ActiveBody = ""
+		return cm.SaveRequest(requestPath, *config)
+	}
+	if err := ValidateBodyName(name); err != nil {
+		return err
+	}
+	bodyFilePath := filepath.Join(cm.requestsDir, requestPath, name+".json")
+	if _, err := os.Stat(bodyFilePath); os.IsNotExist(err) {
+		return fmt.Errorf("body file %q does not exist", name)
+	}
+	config.ActiveBody = name
+	return cm.SaveRequest(requestPath, *config)
 }
 
 // DeleteRequest deletes a request config file
@@ -623,6 +838,300 @@ func (cm *ConfigManager) SaveCollectionSpec(collection string, data []byte, ext 
 		return filePath, nil
 	}
 	return rel, nil
+}
+
+const collectionExportFormat = "api-man.collection.v1"
+
+// CollectionExport is the portable API-Man collection bundle format. It
+// captures request.json files plus sibling named body template files.
+type CollectionExport struct {
+	Format       string                  `json:"format"`
+	Collection   string                  `json:"collection"`
+	ExportedAt   string                  `json:"exportedAt"`
+	Requests     []CollectionExportItem  `json:"requests"`
+	Environments *CollectionEnvironments `json:"environments,omitempty"`
+	SourceSpec   *CollectionExportFile   `json:"sourceSpec,omitempty"`
+}
+
+type CollectionExportItem struct {
+	Path   string            `json:"path"`
+	Config RequestConfig     `json:"config"`
+	Bodies map[string]string `json:"bodies,omitempty"`
+}
+
+type CollectionExportFile struct {
+	Name    string `json:"name"`
+	Content string `json:"content"`
+}
+
+// IsCollectionExport reports whether raw JSON looks like an API-Man collection
+// bundle. It intentionally checks only the format marker so callers can fall
+// back to OpenAPI parsing for ordinary JSON specs.
+func IsCollectionExport(data []byte) bool {
+	var probe struct {
+		Format string `json:"format"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return false
+	}
+	return probe.Format == collectionExportFormat
+}
+
+func ParseCollectionExport(data []byte) (*CollectionExport, error) {
+	var bundle CollectionExport
+	if err := json.Unmarshal(data, &bundle); err != nil {
+		return nil, fmt.Errorf("parsing collection bundle: %w", err)
+	}
+	if bundle.Format != collectionExportFormat {
+		return nil, fmt.Errorf("unsupported collection bundle format %q", bundle.Format)
+	}
+	if strings.TrimSpace(bundle.Collection) == "" {
+		return nil, fmt.Errorf("collection bundle is missing collection")
+	}
+	return &bundle, nil
+}
+
+// ExportCollection builds a portable collection bundle from requests/<collection>.
+func (cm *ConfigManager) ExportCollection(collection string) (*CollectionExport, error) {
+	if err := validateCollectionName(collection); err != nil {
+		return nil, err
+	}
+
+	collectionDir := filepath.Join(cm.requestsDir, collection)
+	info, err := os.Stat(collectionDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading collection: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("collection %q is not a directory", collection)
+	}
+
+	bundle := &CollectionExport{
+		Format:     collectionExportFormat,
+		Collection: collection,
+		ExportedAt: time.Now().UTC().Format(time.RFC3339),
+		Requests:   []CollectionExportItem{},
+	}
+
+	if ce, err := cm.LoadCollectionEnvironments(collection); err == nil && len(ce.Environments) > 0 {
+		bundle.Environments = ce
+	}
+
+	for _, specName := range []string{"openapi.yaml", "openapi.yml", "openapi.json"} {
+		specPath := filepath.Join(collectionDir, specName)
+		data, err := os.ReadFile(specPath)
+		if err == nil {
+			bundle.SourceSpec = &CollectionExportFile{Name: specName, Content: string(data)}
+			break
+		}
+	}
+
+	err = filepath.WalkDir(collectionDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || d.Name() != "request.json" {
+			return nil
+		}
+
+		requestDir := filepath.Dir(path)
+		rel, err := filepath.Rel(collectionDir, requestDir)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("reading request %s: %w", path, err)
+		}
+		var config RequestConfig
+		if err := json.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("parsing request %s: %w", path, err)
+		}
+
+		item := CollectionExportItem{
+			Path:   filepath.ToSlash(rel),
+			Config: config,
+			Bodies: map[string]string{},
+		}
+
+		entries, err := os.ReadDir(requestDir)
+		if err != nil {
+			return fmt.Errorf("reading request directory %s: %w", requestDir, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") || entry.Name() == "request.json" {
+				continue
+			}
+			name := strings.TrimSuffix(entry.Name(), ".json")
+			content, err := os.ReadFile(filepath.Join(requestDir, entry.Name()))
+			if err != nil {
+				return fmt.Errorf("reading body %s/%s: %w", item.Path, entry.Name(), err)
+			}
+			item.Bodies[name] = string(content)
+		}
+		if len(item.Bodies) == 0 {
+			item.Bodies = nil
+		}
+		bundle.Requests = append(bundle.Requests, item)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(bundle.Requests, func(i, j int) bool {
+		return bundle.Requests[i].Path < bundle.Requests[j].Path
+	})
+
+	return bundle, nil
+}
+
+func (cm *ConfigManager) PreviewCollectionExport(bundle *CollectionExport, overrideName string) *OpenAPIPreview {
+	name := sanitizeRequestPathSegment(bundle.Collection)
+	if strings.TrimSpace(overrideName) != "" {
+		name = sanitizeRequestPathSegment(overrideName)
+	}
+	exists, ownedBySpec := inspectCollectionDir(filepath.Join(cm.requestsDir, name))
+
+	bodyCount := 0
+	for _, request := range bundle.Requests {
+		bodyCount += len(request.Bodies)
+	}
+
+	return &OpenAPIPreview{
+		SuggestedCollection: name,
+		Exists:              exists,
+		OwnedBySpec:         ownedBySpec,
+		Operations:          len(bundle.Requests),
+		Requests:            len(bundle.Requests),
+		Bodies:              bodyCount,
+		Type:                "collection",
+	}
+}
+
+// ImportCollectionExport restores a portable API-Man collection bundle.
+func (cm *ConfigManager) ImportCollectionExport(bundle *CollectionExport, opts ImportOptions) (*OpenAPIImportResult, error) {
+	if bundle == nil {
+		return nil, fmt.Errorf("collection bundle is required")
+	}
+	if bundle.Format != collectionExportFormat {
+		return nil, fmt.Errorf("unsupported collection bundle format %q", bundle.Format)
+	}
+
+	collection := sanitizeRequestPathSegment(bundle.Collection)
+	if strings.TrimSpace(opts.OverrideName) != "" {
+		collection = sanitizeRequestPathSegment(opts.OverrideName)
+	}
+	if err := validateCollectionName(collection); err != nil {
+		return nil, err
+	}
+
+	collectionDir := filepath.Join(cm.requestsDir, collection)
+	exists, _ := inspectCollectionDir(collectionDir)
+	if exists {
+		if !opts.Overwrite {
+			return nil, &CollectionExistsError{Name: collection}
+		}
+		if err := os.RemoveAll(collectionDir); err != nil {
+			return nil, fmt.Errorf("removing existing collection: %w", err)
+		}
+	}
+	if err := os.MkdirAll(collectionDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating collection directory: %w", err)
+	}
+
+	if bundle.Environments != nil {
+		if err := cm.SaveCollectionEnvironments(collection, bundle.Environments); err != nil {
+			return nil, err
+		}
+	}
+
+	specPath := ""
+	if bundle.SourceSpec != nil && bundle.SourceSpec.Name != "" {
+		name := filepath.Base(bundle.SourceSpec.Name)
+		switch name {
+		case "openapi.yaml", "openapi.yml", "openapi.json":
+			path := filepath.Join(collectionDir, name)
+			if err := os.WriteFile(path, []byte(bundle.SourceSpec.Content), 0644); err != nil {
+				return nil, fmt.Errorf("writing source spec: %w", err)
+			}
+			if rel, err := filepath.Rel(cm.configDir, path); err == nil {
+				specPath = rel
+			} else {
+				specPath = path
+			}
+		}
+	}
+
+	imported := 0
+	bodyCount := 0
+	for _, request := range bundle.Requests {
+		relPath, err := cleanBundleRequestPath(request.Path)
+		if err != nil {
+			return nil, fmt.Errorf("invalid request path %q: %w", request.Path, err)
+		}
+
+		requestDir := filepath.Join(collectionDir, filepath.FromSlash(relPath))
+		if err := os.MkdirAll(requestDir, 0755); err != nil {
+			return nil, fmt.Errorf("creating request directory: %w", err)
+		}
+
+		data, err := json.MarshalIndent(request.Config, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("marshaling request %s: %w", request.Path, err)
+		}
+		if err := os.WriteFile(filepath.Join(requestDir, "request.json"), data, 0644); err != nil {
+			return nil, fmt.Errorf("writing request %s: %w", request.Path, err)
+		}
+
+		for name, content := range request.Bodies {
+			if err := ValidateBodyName(name); err != nil {
+				return nil, fmt.Errorf("invalid body name %q for %s: %w", name, request.Path, err)
+			}
+			if err := os.WriteFile(filepath.Join(requestDir, name+".json"), []byte(content), 0644); err != nil {
+				return nil, fmt.Errorf("writing body %s/%s.json: %w", request.Path, name, err)
+			}
+			bodyCount++
+		}
+		imported++
+	}
+
+	return &OpenAPIImportResult{
+		Collection: collection,
+		Imported:   imported,
+		Bodies:     bodyCount,
+		SpecPath:   specPath,
+	}, nil
+}
+
+func validateCollectionName(collection string) error {
+	if strings.TrimSpace(collection) == "" {
+		return fmt.Errorf("collection name is required")
+	}
+	if filepath.Base(collection) != collection || collection == "." || collection == ".." {
+		return fmt.Errorf("collection name must be a single folder name")
+	}
+	return nil
+}
+
+func cleanBundleRequestPath(path string) (string, error) {
+	cleaned := filepath.Clean(filepath.FromSlash(strings.TrimSpace(path)))
+	if cleaned == "." || cleaned == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if filepath.IsAbs(cleaned) {
+		return "", fmt.Errorf("path must be relative")
+	}
+	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
+		if part == ".." {
+			return "", fmt.Errorf("path cannot contain '..'")
+		}
+	}
+	return filepath.ToSlash(cleaned), nil
 }
 
 // ResolveEnvironment returns the collection-specific environment if it exists,

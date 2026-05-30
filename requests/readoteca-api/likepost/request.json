@@ -1,5 +1,5 @@
 {
-  "url": "/posts/{id}/like",
+  "url": "/api/posts/{id}/like",
   "headers": {
     "Content-Type": "application/json"
   },

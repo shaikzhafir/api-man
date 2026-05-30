@@ -1,5 +1,5 @@
 {
-  "url": "/google/callback",
+  "url": "/api/google/callback",
   "headers": {},
   "body": "",
   "method": "GET",

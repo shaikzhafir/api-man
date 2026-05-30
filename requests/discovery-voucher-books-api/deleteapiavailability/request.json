@@ -1,7 +1,12 @@
 {
+  "name": "deleteapiavailability",
+  "description": "",
+  "method": "DELETE",
   "url": "/api/availability",
   "headers": {},
+  "cookies": null,
   "body": "",
-  "method": "DELETE",
-  "name": "deleteapiavailability"
+  "activeBody": "bob",
+  "params": null,
+  "timeout": 0
 }

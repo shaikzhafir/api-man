@@ -1,9 +1,9 @@
 {
-  "url": "/api/logout",
+  "url": "/api/me/api-token",
   "headers": {
     "Content-Type": "application/json"
   },
   "body": "",
   "method": "POST",
-  "name": "logout"
+  "name": "createmeapitoken"
 }

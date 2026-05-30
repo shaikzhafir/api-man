@@ -1,5 +1,5 @@
 {
-  "url": "/library",
+  "url": "/api/library",
   "headers": {},
   "body": "",
   "method": "GET",

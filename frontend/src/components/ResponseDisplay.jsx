@@ -32,13 +32,30 @@ function ResponseDisplay({ response, isLoading }) {
 
   if (isLoading) {
     return (
-      <div className="response-display">
+      <div className="response-display" aria-busy="true">
         <div className="response-header">
           <h3>Response</h3>
+          <div className="response-info" aria-hidden="true">
+            <span className="skeleton-pill skeleton-pill-status" />
+            <span className="skeleton-pill skeleton-pill-meta" />
+            <span className="skeleton-pill skeleton-pill-meta" />
+          </div>
         </div>
-        <div className="loading-state">
-          <div className="spinner"></div>
-          <p>Sending request...</p>
+        <div className="response-tabs" aria-hidden="true">
+          <span className="tab-button active">Body</span>
+          <span className="tab-button">Headers</span>
+        </div>
+        <div className="response-content">
+          <div className="response-body">
+            <div className="response-skeleton" aria-hidden="true">
+              <div className="skeleton-line" />
+              <div className="skeleton-line skeleton-line-90" />
+              <div className="skeleton-line skeleton-line-70" />
+              <div className="skeleton-line" />
+              <div className="skeleton-line skeleton-line-50" />
+            </div>
+            <span className="visually-hidden">Sending request…</span>
+          </div>
         </div>
       </div>
     )

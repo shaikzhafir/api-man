@@ -58,6 +58,25 @@ function App() {
     }
   }
 
+  const handleCreateEnvironment = async (name, source) => {
+    const res = await fetch('/api/environments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, source: source || undefined }),
+    })
+    if (!res.ok) {
+      let message = `Failed to create environment (${res.status})`
+      try {
+        const data = await res.json()
+        if (data?.error) message = data.error
+      } catch { /* ignore parse error, keep status fallback */ }
+      throw new Error(message)
+    }
+    const updated = await res.json()
+    setEnvironments(updated)
+    return updated
+  }
+
   const handleRequestSelect = (request) => {
     setSelectedRequest(request)
     setResponse(null)
@@ -124,6 +143,7 @@ function App() {
       setActiveCollection(result.collection)
       loadCollectionEnvs(result.collection)
       const parts = [`Imported ${result.imported} requests into ${result.collection}`]
+      if (result.bodies) parts.push(`${result.bodies} bodies`)
       if (result.pruned) parts.push(`pruned ${result.pruned} stale`)
       if (result.specPath) parts.push(`spec saved to ${result.specPath}`)
       setImportStatus({
@@ -136,6 +156,35 @@ function App() {
   }
 
   const handleClearImportStatus = () => setImportStatus(null)
+
+  const handleExportCollection = async (collection) => {
+    if (!collection) return
+    setImportStatus({ type: 'loading', message: `Exporting ${collection}...` })
+
+    try {
+      const res = await fetch(`/api/export-collection/${encodeURIComponent(collection)}`)
+      if (!res.ok) {
+        const message = await res.text()
+        throw new Error(message.trim() || 'Export failed')
+      }
+
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${collection}.api-man-collection.json`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      setImportStatus({
+        type: 'success',
+        message: `Exported ${collection}. Import this file to restore requests and saved bodies.`,
+      })
+    } catch (error) {
+      setImportStatus({ type: 'error', message: error.message })
+    }
+  }
 
   const handleSaveCollectionEnvs = async (updatedEnvs) => {
     if (!activeCollection) return
@@ -207,6 +256,7 @@ function App() {
                 ? collectionEnvs.environments[selectedEnv].baseURL
                 : activeEnvDisplay?.baseURL
             }
+            onCreateEnvironment={handleCreateEnvironment}
           />
           {activeCollection && (
             <button
@@ -228,6 +278,7 @@ function App() {
             selectedRequest={selectedRequest}
             onImportOpenAPI={handleImportOpenAPI}
             onPreviewOpenAPI={previewOpenAPI}
+            onExportCollection={handleExportCollection}
             onClearImportStatus={handleClearImportStatus}
             importStatus={importStatus}
           />

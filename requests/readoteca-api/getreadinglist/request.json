@@ -1,0 +1,7 @@
+{
+  "url": "/api/reading-list",
+  "headers": {},
+  "body": "",
+  "method": "GET",
+  "name": "getreadinglist"
+}

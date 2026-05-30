@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenAPI, onPreviewOpenAPI, onClearImportStatus, importStatus }) {
+function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenAPI, onPreviewOpenAPI, onExportCollection, onClearImportStatus, importStatus }) {
   const [expandedFolders, setExpandedFolders] = useState(new Set())
   const [searchTerm, setSearchTerm] = useState('')
   const [pendingFile, setPendingFile] = useState(null)
@@ -8,6 +8,7 @@ function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenA
   const [pendingPreview, setPendingPreview] = useState(null)
   const [previewError, setPreviewError] = useState('')
   const importInputId = 'openapi-import-input'
+  const loadingLabel = importStatus?.message?.startsWith('Exporting') ? 'Exporting...' : 'Importing...'
 
   useEffect(() => {
     setExpandedFolders(new Set(Object.keys(requests)))
@@ -122,7 +123,7 @@ function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenA
             className={`import-button ${importStatus?.type === 'loading' ? 'loading' : ''}`}
             htmlFor={importInputId}
           >
-            {importStatus?.type === 'loading' ? 'Importing...' : 'Import'}
+            {importStatus?.type === 'loading' ? loadingLabel : 'Import'}
           </label>
           <input
             id={importInputId}
@@ -174,12 +175,20 @@ function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenA
             {pendingPreview && (() => {
               const name = pendingCollection.trim() || pendingPreview.suggestedCollection
               const matchesSuggestion = name === pendingPreview.suggestedCollection
-              const opLabel = `${pendingPreview.operations} operation${pendingPreview.operations === 1 ? '' : 's'}`
+              const isCollectionBundle = pendingPreview.type === 'collection'
+              const itemCount = isCollectionBundle ? pendingPreview.requests : pendingPreview.operations
+              const itemLabel = isCollectionBundle ? 'request' : 'operation'
+              const opLabel = `${itemCount} ${itemLabel}${itemCount === 1 ? '' : 's'}`
+              const bodyLabel = isCollectionBundle && pendingPreview.bodies
+                ? ` Includes ${pendingPreview.bodies} persisted bod${pendingPreview.bodies === 1 ? 'y' : 'ies'}.`
+                : ''
 
               if (matchesSuggestion && pendingPreview.exists && pendingPreview.ownedBySpec) {
                 return (
                   <div className="import-form-banner update">
-                    Overwriting spec-owned collection. {opLabel}. Generated requests will be rewritten; operations no longer in this spec will be pruned.
+                    {isCollectionBundle
+                      ? `Replacing existing collection. ${opLabel}.${bodyLabel}`
+                      : `Overwriting spec-owned collection. ${opLabel}. Generated requests will be rewritten; operations no longer in this spec will be pruned.`}
                   </div>
                 )
               }
@@ -193,13 +202,13 @@ function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenA
               if (!matchesSuggestion) {
                 return (
                   <div className="import-form-banner info">
-                    New folder. {opLabel}. Server will confirm if the renamed target collides.
+                    New folder. {opLabel}.{bodyLabel} Server will confirm if the renamed target collides.
                   </div>
                 )
               }
               return (
                 <div className="import-form-banner info">
-                  New collection. {opLabel}.
+                  New collection. {opLabel}.{bodyLabel}
                 </div>
               )
             })()}
@@ -216,6 +225,12 @@ function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenA
                 : isUpdate
                 ? 'Update'
                 : 'Import'
+              const confirmTitle = isUpdate
+                ? pendingPreview.type === 'collection'
+                  ? 'Replaces the existing collection with the exported bundle'
+                  : 'Rewrites generated requests and prunes operations no longer in this spec'
+                : undefined
+              const submitOverwrite = isUpdate && pendingPreview.type === 'collection'
               return (
                 <div className="import-form-actions">
                   <button
@@ -228,10 +243,10 @@ function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenA
                   </button>
                   <button
                     className={confirmClass}
-                    onClick={() => handleConfirmImport(false)}
+                    onClick={() => handleConfirmImport(submitOverwrite)}
                     disabled={!pendingCollection.trim() || importStatus?.type === 'loading' || !!previewError}
                     type="button"
-                    title={isUpdate ? 'Rewrites generated requests and prunes operations no longer in this spec' : undefined}
+                    title={confirmTitle}
                   >
                     {confirmLabel}
                   </button>
@@ -287,7 +302,7 @@ function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenA
           </div>
         )}
 
-        {importStatus?.message && importStatus.type !== 'conflict' && importStatus.type !== 'loading' && (
+        {importStatus?.message && importStatus.type !== 'conflict' && (
           <div className={`import-status ${importStatus.type}`}>
             {importStatus.message}
           </div>
@@ -324,6 +339,17 @@ function RequestList({ requests, onRequestSelect, selectedRequest, onImportOpenA
                 </span>
                 <span className="folder-name">{folder}</span>
                 <span className="request-count">{requestCount}</span>
+                <button
+                  type="button"
+                  className="folder-export"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onExportCollection?.(folder)
+                  }}
+                  title={`Export ${folder} with saved bodies`}
+                >
+                  Export
+                </button>
               </div>
               
               {(expandedFolders.has(folder) || normalizedSearch) && (

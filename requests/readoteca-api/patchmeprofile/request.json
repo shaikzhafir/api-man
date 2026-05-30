@@ -1,5 +1,5 @@
 {
-  "url": "/me/profile",
+  "url": "/api/me/profile",
   "headers": {
     "Content-Type": "application/json"
   },

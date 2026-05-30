@@ -1,5 +1,5 @@
 {
-  "url": "/library/{id}/review/publish",
+  "url": "/api/library/{id}/review/publish",
   "headers": {},
   "body": "",
   "method": "DELETE",

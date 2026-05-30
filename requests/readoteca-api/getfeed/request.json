@@ -1,5 +1,5 @@
 {
-  "url": "/feed",
+  "url": "/api/feed",
   "headers": {},
   "body": "",
   "method": "GET",

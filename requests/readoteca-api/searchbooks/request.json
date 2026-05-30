@@ -1,5 +1,5 @@
 {
-  "url": "/books/search",
+  "url": "/api/books/search",
   "headers": {},
   "body": "",
   "method": "GET",

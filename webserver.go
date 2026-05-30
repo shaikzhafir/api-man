@@ -72,7 +72,9 @@ func (ws *WebServer) Start() error {
 	http.HandleFunc("/api/request/", ws.handleRequestDetails)
 	http.HandleFunc("/api/openapi-preview", ws.handleOpenAPIPreview)
 	http.HandleFunc("/api/import-openapi", ws.handleImportOpenAPI)
+	http.HandleFunc("/api/export-collection/", ws.handleExportCollection)
 	http.HandleFunc("/api/execute", ws.handleExecute)
+	http.HandleFunc("/api/request-bodies/", ws.handleRequestBodies)
 
 	// Serve static files
 	if ws.static != "" {
@@ -102,18 +104,55 @@ func (ws *WebServer) corsMiddleware(next http.Handler) http.Handler {
 }
 
 func (ws *WebServer) handleEnvironments(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		ws.respondEnvironmentList(w, http.StatusOK)
+	case http.MethodPost:
+		ws.handleCreateEnvironment(w, r)
+	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (ws *WebServer) handleCreateEnvironment(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		Name   string `json:"name"`
+		Source string `json:"source,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
 
+	name := strings.TrimSpace(payload.Name)
+	source := strings.TrimSpace(payload.Source)
+
+	if _, err := ws.cm.CreateEnvironment(name, source); err != nil {
+		var existsErr *EnvironmentExistsError
+		switch {
+		case errors.As(err, &existsErr):
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		}
+		return
+	}
+
+	ws.respondEnvironmentList(w, http.StatusCreated)
+}
+
+func (ws *WebServer) respondEnvironmentList(w http.ResponseWriter, status int) {
 	envNames, err := ws.cm.ListEnvironments()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error listing environments: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	var environments []EnvironmentInfo
+	environments := make([]EnvironmentInfo, 0, len(envNames))
 	for _, name := range envNames {
 		env, err := ws.cm.LoadEnvironment(name)
 		if err != nil {
@@ -126,6 +165,7 @@ func (ws *WebServer) handleEnvironments(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(environments)
 }
 
@@ -232,6 +272,18 @@ func (ws *WebServer) handleOpenAPIPreview(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if IsCollectionExport(data) {
+		bundle, err := ParseCollectionExport(data)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error loading collection bundle: %v", err), http.StatusBadRequest)
+			return
+		}
+		preview := ws.cm.PreviewCollectionExport(bundle, strings.TrimSpace(r.FormValue("collection")))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(preview)
+		return
+	}
+
 	spec, err := LoadOpenAPISpecFromData(data)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error loading OpenAPI spec: %v", err), http.StatusBadRequest)
@@ -271,31 +323,36 @@ func (ws *WebServer) handleImportOpenAPI(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	opts := ImportOptions{
+		OverrideName: strings.TrimSpace(r.FormValue("collection")),
+		Overwrite:    r.FormValue("overwrite") == "true",
+	}
+
+	if IsCollectionExport(data) {
+		bundle, err := ParseCollectionExport(data)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error loading collection bundle: %v", err), http.StatusBadRequest)
+			return
+		}
+		result, err := ws.cm.ImportCollectionExport(bundle, opts)
+		if err != nil {
+			ws.writeImportError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+
 	spec, err := LoadOpenAPISpecFromData(data)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error loading OpenAPI spec: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	opts := ImportOptions{
-		OverrideName: strings.TrimSpace(r.FormValue("collection")),
-		Overwrite:    r.FormValue("overwrite") == "true",
-	}
-
 	result, err := ws.cm.ImportRequestsFromOpenAPI(spec, opts)
 	if err != nil {
-		var existsErr *CollectionExistsError
-		if errors.As(err, &existsErr) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]any{
-				"error":               "collection_exists",
-				"suggestedCollection": existsErr.Name,
-				"message":             fmt.Sprintf("Collection %q already exists. Choose a different name or overwrite.", existsErr.Name),
-			})
-			return
-		}
-		http.Error(w, fmt.Sprintf("Error importing requests: %v", err), http.StatusInternalServerError)
+		ws.writeImportError(w, err)
 		return
 	}
 
@@ -309,6 +366,51 @@ func (ws *WebServer) handleImportOpenAPI(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+func (ws *WebServer) writeImportError(w http.ResponseWriter, err error) {
+	var existsErr *CollectionExistsError
+	if errors.As(err, &existsErr) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error":               "collection_exists",
+			"suggestedCollection": existsErr.Name,
+			"message":             fmt.Sprintf("Collection %q already exists. Choose a different name or overwrite.", existsErr.Name),
+		})
+		return
+	}
+	http.Error(w, fmt.Sprintf("Error importing requests: %v", err), http.StatusInternalServerError)
+}
+
+func (ws *WebServer) handleExportCollection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	collection := strings.TrimPrefix(r.URL.Path, "/api/export-collection/")
+	if collection == "" {
+		http.Error(w, "Collection name is required", http.StatusBadRequest)
+		return
+	}
+
+	bundle, err := ws.cm.ExportCollection(collection)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error exporting collection: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	data, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error marshaling collection export: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	filename := fmt.Sprintf("%s.api-man-collection.json", collection)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Write(data)
 }
 
 // detectSpecExt picks "yaml" or "json" based on the uploaded filename, falling
@@ -332,6 +434,135 @@ func detectSpecExt(name string, data []byte) string {
 		break
 	}
 	return "yaml"
+}
+
+type bodySummary struct {
+	Name    string `json:"name"`
+	Content string `json:"content"`
+}
+
+type bodiesResponse struct {
+	Active string        `json:"active"`
+	Bodies []bodySummary `json:"bodies"`
+}
+
+func (ws *WebServer) handleRequestBodies(w http.ResponseWriter, r *http.Request) {
+	requestPath := strings.TrimPrefix(r.URL.Path, "/api/request-bodies/")
+	if requestPath == "" {
+		http.Error(w, "Request path is required", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		ws.respondBodyList(w, requestPath)
+
+	case http.MethodPost:
+		var payload struct {
+			Name   string `json:"name"`
+			Source string `json:"source,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+			return
+		}
+		name := strings.TrimSpace(payload.Name)
+		source := strings.TrimSpace(payload.Source)
+		if _, err := ws.cm.CreateBody(requestPath, name, source); err != nil {
+			ws.writeBodyError(w, err)
+			return
+		}
+		ws.respondBodyList(w, requestPath)
+
+	case http.MethodPut:
+		name := strings.TrimSpace(r.URL.Query().Get("body"))
+		if name == "" {
+			http.Error(w, "body query parameter is required", http.StatusBadRequest)
+			return
+		}
+		data, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error reading body: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := ws.cm.SaveBodyContent(requestPath, name, string(data)); err != nil {
+			ws.writeBodyError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+
+	case http.MethodDelete:
+		name := strings.TrimSpace(r.URL.Query().Get("body"))
+		if name == "" || name == "default" {
+			http.Error(w, "cannot delete default body", http.StatusBadRequest)
+			return
+		}
+		if err := ws.cm.RemoveBody(requestPath, name); err != nil {
+			ws.writeBodyError(w, err)
+			return
+		}
+		ws.respondBodyList(w, requestPath)
+
+	case http.MethodPatch:
+		var payload struct {
+			Active string `json:"active"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := ws.cm.SetActiveBodyByName(requestPath, strings.TrimSpace(payload.Active)); err != nil {
+			ws.writeBodyError(w, err)
+			return
+		}
+		ws.respondBodyList(w, requestPath)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (ws *WebServer) respondBodyList(w http.ResponseWriter, requestPath string) {
+	config, err := ws.cm.LoadRequest(requestPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error loading request: %v", err), http.StatusNotFound)
+		return
+	}
+	names, _, err := ws.cm.ListBodies(requestPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error listing bodies: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	bodies := make([]bodySummary, 0, len(names)+1)
+	bodies = append(bodies, bodySummary{Name: "default", Content: config.Body})
+	for _, name := range names {
+		content, err := ws.cm.LoadBodyContent(requestPath, name)
+		if err != nil {
+			continue
+		}
+		bodies = append(bodies, bodySummary{Name: name, Content: content})
+	}
+
+	active := config.ActiveBody
+	if active == "" {
+		active = "default"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(bodiesResponse{Active: active, Bodies: bodies})
+}
+
+func (ws *WebServer) writeBodyError(w http.ResponseWriter, err error) {
+	var existsErr *BodyExistsError
+	w.Header().Set("Content-Type", "application/json")
+	if errors.As(err, &existsErr) {
+		w.WriteHeader(http.StatusConflict)
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+	}
+	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }
 
 func (ws *WebServer) handleExecute(w http.ResponseWriter, r *http.Request) {

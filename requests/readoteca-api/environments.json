@@ -1,0 +1,11 @@
+{
+  "environments": {
+    "dev": {
+      "baseURL": "http://localhost:8080",
+      "headers": {},
+      "cookies": {},
+      "auth": {},
+      "variables": {}
+    }
+  }
+}

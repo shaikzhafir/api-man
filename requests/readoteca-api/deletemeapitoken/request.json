@@ -1,0 +1,7 @@
+{
+  "url": "/api/me/api-token",
+  "headers": {},
+  "body": "",
+  "method": "DELETE",
+  "name": "deletemeapitoken"
+}

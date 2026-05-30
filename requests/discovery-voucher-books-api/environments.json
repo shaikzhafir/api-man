@@ -1,13 +1,3 @@
 {
-  "environments": {
-    "dev": {
-      "baseURL": "https://sg-culture-pass-books.zadusz96.workers.dev",
-      "headers": {},
-      "cookies": {
-        "sb_session": "1644b78e5acfdd0c8335d95d220d5c487eebac14e0a0a1d3f5cfc4e2d86913e7"
-      },
-      "auth": {},
-      "variables": {}
-    }
-  }
+  "environments": {}
 }
